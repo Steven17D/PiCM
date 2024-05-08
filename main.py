@@ -3,48 +3,25 @@ We refer to the superparticle as particle
 """
 from itertools import product
 
+import matplotlib
 import numpy as np
-import scipy.constants as const
 from matplotlib import pyplot as plt
 
+matplotlib.style.use('classic')
+
 from acceptance_rejection import get_random_value
-from scipy.stats import truncnorm, maxwell, norm
 
-
-# k_b = const.physical_constants['Boltzmann constant'][0]
-# omega_p = np.sqrt(n_alpha * (q_alpha ** 2) / (m_alpha))
-# v_th = np.array([1, 1]) * np.sqrt(k_b * T_alpha * m_alpha)  # Thermal velocity
-debye_length = 1  # v_th / omega_p
-<<<<<<< HEAD
-L = np.array([3, 3]) * debye_length  # Lx and Ly are the lengths of the system in the x and y directions in units of the Debye length.
-n = np.array([3, 3])
-=======
-L = np.array([64, 64]) * debye_length  # Lx and Ly are the lengths of the system in the x and y directions in units of the Debye length.
-n = np.array([64, 64])
->>>>>>> bf5b899665addb7b819ae02a0a648732e875a52e
-Lx, Ly = L  # size of the system
-Nx, Ny = n  # number of grid points
-dx, dy = Lx / Nx, Ly / Ny  # delta_x and delta_y
-delta_r = L / n  # Vector of delta x and delta y
-dxdy = np.multiply.reduce(delta_r)
-q = 1  # Charge of a cell? TODO: Check
-ro_c = q / dxdy
-assert 0.5 * delta_r[0] < debye_length
-assert 0.5 * delta_r[1] < debye_length
-
-<<<<<<< HEAD
-N = 3
-=======
-N = 256
->>>>>>> bf5b899665addb7b819ae02a0a648732e875a52e
+debye_length = 1
+omega_pe = 1
 v_th = 1
-v_d = 5 * v_th
-n_e = 0.5  # TODO: Check N / np.multiply.reduce(L)
-B = np.zeros(3)
-q_over_m = 1
 
 
 def maxwell_distribution(v):
+    """
+    Velocity distribution
+    """
+    v_d = 5
+    n_e = 0.5  # In order to normalize area
     return (
         (n_e / np.sqrt(2 * np.pi * (v_th ** 2))) * (
             np.exp((-(v - v_d) ** 2)/(2 * (v_th ** 2))) + np.exp((-(v + v_d) ** 2)/(2 * (v_th ** 2)))
@@ -60,17 +37,19 @@ def ifft(v: np.ndarray) -> np.ndarray:
     return np.fft.ifft(v)
 
 
-def density(positions: np.ndarray):
+def density(positions: np.ndarray, n, delta_r, ro_c, dxdy):
     """
     Calculate the density of particles
     TODO: add charges list
     :param positions:
     :return:
     """
-    rho = np.empty(n)
-    for p in range(N):
-        i, j = np.floor(positions[p] / delta_r).astype(int)
-        h = positions[p] - np.array([i, j]) * delta_r
+    rho = np.zeros(n)
+    for position in positions:
+        if np.isnan(position[0]):
+            pass
+        i, j = np.floor(position / delta_r).astype(int)
+        h = position - np.array([i, j]) * delta_r
         h_n = delta_r - h
         rho[i, j] = ro_c * (np.multiply.reduce(h_n) / dxdy)
         rho[i, (j+1) % n[1]] = ro_c * (h_n[0] * h[1] / dxdy)
@@ -80,7 +59,7 @@ def density(positions: np.ndarray):
     return rho
 
 
-def potential(rho: np.ndarray):
+def potential(rho: np.ndarray, n, delta_r):
     """
     Calculate the potential (phi) from the charge density (rho)
     TODO: Write the proof of the FFT from rho to phi
@@ -121,7 +100,7 @@ def potential(rho: np.ndarray):
     return np.real(phi)
 
 
-def field_nodes(phi: np.ndarray):
+def field_nodes(phi: np.ndarray, n, delta_r):
     E = np.zeros([*phi.shape, 3])
 
     for j in range(n[1]):
@@ -139,7 +118,7 @@ def field_nodes(phi: np.ndarray):
     return E
 
 
-def field_particles(field: np.ndarray, positions: np.array):
+def field_particles(field: np.ndarray, positions: np.array, n, delta_r):
     """
     TODO: Add moves
     :param field:
@@ -148,8 +127,8 @@ def field_particles(field: np.ndarray, positions: np.array):
     """
     dx, dy = delta_r
     Nx, Ny = n
-    E = np.empty([N, 3])
-    for p in range(N):
+    E = np.zeros([len(positions), 3])
+    for p, position in enumerate(positions, start=0):
         i = int(np.floor(positions[p][0] / dx))
         j = int(np.floor(positions[p][1] / dy))
         hx = positions[p][0] - (i * dx)
@@ -166,30 +145,30 @@ def field_particles(field: np.ndarray, positions: np.array):
     return E / (dx * dy)
 
 
-def boris(velocities, E, dt, direction):
+def boris(velocities, E, dt, direction, q_over_m, B):
     dt = 0.5 * direction * dt
-    for p in range(N):
+    for p, velocity in enumerate(velocities):
         t = 0.5 * q_over_m * B * dt
         t_2 = np.linalg.norm(t) * np.linalg.norm(t)
         s = (2.0 * t) / (1.0 + t_2)
-        v_minus = velocities[p] + 0.5 * q_over_m * E[p] * dt
+        v_minus = velocity + 0.5 * q_over_m * E[p] * dt
         v_prime = v_minus + np.cross(v_minus, t)
         v_plus = v_minus + np.cross(v_prime, s)
         velocities[p] = v_plus + 0.5 * q_over_m * E[p] * dt
-    return velocities
+    # return velocities
 
 
-def update(positions, velocities, E, dt):
-    velocities = boris(velocities, E, dt, direction=1)
-    for p in range(N):
+def update(positions, velocities, E, dt, L, q_over_m, B):
+    boris(velocities, E, dt, 1, q_over_m, B)
+    for p, position in enumerate(positions, start=0):
         positions[p] += velocities[p][:2] * dt
         positions[p][0] = positions[p][0] % L[0]
         positions[p][1] = positions[p][1] % L[1]
-    return velocities, positions
+    # return velocities, positions
 
 
-def setup():
-    positions = np.random.uniform(0, Lx, [N, 2])
+def setup(Lx, Ly, v_d, N):
+    positions = np.array([np.random.uniform(0, l, [N]) for l in [Lx, Ly]]).T
     velocities = np.zeros([N, 3])
     velocities[:, 0] = [get_random_value(maxwell_distribution, -v_d*2, v_d*2, v_d) for _ in range(N)]
     return positions, velocities
@@ -202,25 +181,60 @@ A1 = round(A/dx)  # This is the affected cell
 A2 = (A1 + 1) % Lx  # This is right
 A3 = (A1 - 1) % Lx  # This is left
 """
-def main():
-    positions, velocities = setup()
-    steps = 1000
-    dt = 0.1
 
-    fig, ax = plt.subplots(2, 1)
-    ax[0].scatter(positions[:, 0], positions[:, 1])
-    ax[1].scatter(positions[:, 0], velocities[:, 0])
+def main():
+    # Table II.
+    Lx = Ly = 64 * debye_length  # size of the system
+    n_x = n_y = 64
+    dx, dy = Lx / n_x, Ly / n_y  # delta_x and delta_y
+    dt = 0.1  # TODO: Change 0.05 / omega_pe
+    steps = 1000
+    v_d = 5.0 * v_th  # Drift velocity
+    N = 256  # TODO: Change to 10 ** 6
+
+    L = np.array([Lx, Ly])
+    n = np.array([n_x, n_y])
+    delta_r = L / n  # Vector of delta x and delta y
+    dxdy = np.multiply.reduce(delta_r)
+    q = 1  # Charge of a cell? TODO: Check
+    rho_c = q / dxdy
+    assert 0.5 * delta_r[0] < debye_length
+    assert 0.5 * delta_r[1] < debye_length
+
+    n_e = 0.5  # TODO: Check N / np.multiply.reduce(L)
+    B = np.zeros(3)
+    q_over_m = 1
+
+    fig, ax = plt.subplots(2, 2)
+
+    positions, velocities = setup(Lx, Ly, v_d, N)
+    plot_initial_conditions(ax, Lx, Ly, positions, v_d, velocities, 0)
+
+    for step in range(steps*20):
+        rho = density(positions, n, delta_r, rho_c, dxdy)
+        phi = potential(rho, n, delta_r)
+        e_field_n = field_nodes(phi, n, delta_r)
+        e_field_p = field_particles(e_field_n, positions, n, delta_r)
+        if step == 0:
+            boris(velocities, e_field_p, dt, -1, q_over_m, B)
+        update(positions, velocities, e_field_p, dt, L, q_over_m, B)
+        boris(velocities, e_field_p, dt, 1, q_over_m, B)
+
+    plot_initial_conditions(ax, Lx, Ly, positions, v_d, velocities, 1)
     plt.show()
 
-    for step in range(steps):
-        rho = density(positions)
-        phi = potential(rho)
-        e_field_n = field_nodes(phi)
-        e_field_p = field_particles(e_field_n, positions)
-        if step == 0:
-            velocities = boris(velocities, e_field_p, dt, direction=-1)
-        velocities, positions = update(positions, velocities, e_field_p, dt)
-        velocities = boris(velocities, e_field_p, dt, direction=1)
+
+def plot_initial_conditions(ax, Lx, Ly, positions, v_d, velocities, i):
+    ax[0, i].scatter(positions[:, 0], positions[:, 1], c=np.where(velocities[:, 0] < 0, 'b', 'r'), s=5, linewidth=0)
+    ax[0, i].set_xlim([0, Lx])
+    ax[0, i].set_ylim([0, Ly])
+    ax[0, i].set_xlabel(r"$x / \lambda_D$")
+    ax[0, i].set_ylabel(r"$y / \lambda_D$")
+    ax[1, i].scatter(positions[:, 0], velocities[:, 0], c=np.where(velocities[:, 0] < 0, 'b', 'r'), s=5, linewidth=0)
+    ax[1, i].set_xlim([0, Lx])
+    ax[1, i].set_ylim([-v_d * 2, v_d * 2])
+    ax[1, i].set_xlabel(r"$x / \lambda_D$")
+    ax[1, i].set_ylabel(r"$v_x / v_{th}$")
 
 
 if __name__ == '__main__':
