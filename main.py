@@ -6,6 +6,7 @@ from itertools import product
 import matplotlib
 import numpy as np
 from matplotlib import pyplot as plt
+from tqdm import tqdm
 
 matplotlib.style.use('classic')
 
@@ -51,10 +52,10 @@ def density(positions: np.ndarray, n, delta_r, ro_c, dxdy):
         i, j = np.floor(position / delta_r).astype(int)
         h = position - np.array([i, j]) * delta_r
         h_n = delta_r - h
-        rho[i, j] = ro_c * (np.multiply.reduce(h_n) / dxdy)
-        rho[i, (j+1) % n[1]] = ro_c * (h_n[0] * h[1] / dxdy)
-        rho[(i+1) % n[0], j] = ro_c * (h_n[1] * h[0] / dxdy)
-        rho[(i+1) % n[0], (j+1) % n[1]] = ro_c * (np.multiply.reduce(h) / dxdy)
+        rho[i, j] += ro_c * (np.multiply.reduce(h_n) / dxdy)
+        rho[i, (j+1) % n[1]] += ro_c * (h_n[0] * h[1] / dxdy)
+        rho[(i+1) % n[0], j] += ro_c * (h_n[1] * h[0] / dxdy)
+        rho[(i+1) % n[0], (j+1) % n[1]] += ro_c * (np.multiply.reduce(h) / dxdy)
 
     return rho
 
@@ -210,7 +211,7 @@ def main():
     positions, velocities = setup(Lx, Ly, v_d, N)
     plot_initial_conditions(ax, Lx, Ly, positions, v_d, velocities, 0)
 
-    for step in range(steps*20):
+    for step in tqdm(range(steps)):
         rho = density(positions, n, delta_r, rho_c, dxdy)
         phi = potential(rho, n, delta_r)
         e_field_n = field_nodes(phi, n, delta_r)
