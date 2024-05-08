@@ -15,8 +15,13 @@ from scipy.stats import truncnorm, maxwell, norm
 # omega_p = np.sqrt(n_alpha * (q_alpha ** 2) / (m_alpha))
 # v_th = np.array([1, 1]) * np.sqrt(k_b * T_alpha * m_alpha)  # Thermal velocity
 debye_length = 1  # v_th / omega_p
+<<<<<<< HEAD
 L = np.array([3, 3]) * debye_length  # Lx and Ly are the lengths of the system in the x and y directions in units of the Debye length.
 n = np.array([3, 3])
+=======
+L = np.array([64, 64]) * debye_length  # Lx and Ly are the lengths of the system in the x and y directions in units of the Debye length.
+n = np.array([64, 64])
+>>>>>>> bf5b899665addb7b819ae02a0a648732e875a52e
 Lx, Ly = L  # size of the system
 Nx, Ny = n  # number of grid points
 dx, dy = Lx / Nx, Ly / Ny  # delta_x and delta_y
@@ -27,7 +32,11 @@ ro_c = q / dxdy
 assert 0.5 * delta_r[0] < debye_length
 assert 0.5 * delta_r[1] < debye_length
 
+<<<<<<< HEAD
 N = 3
+=======
+N = 256
+>>>>>>> bf5b899665addb7b819ae02a0a648732e875a52e
 v_th = 1
 v_d = 5 * v_th
 n_e = 0.5  # TODO: Check N / np.multiply.reduce(L)
@@ -58,17 +67,27 @@ def density(positions: np.ndarray):
     :param positions:
     :return:
     """
+<<<<<<< HEAD
     rho = np.empty(n)
+=======
+    rho = np.array(n)
+>>>>>>> bf5b899665addb7b819ae02a0a648732e875a52e
     for p in range(N):
         i, j = np.floor(positions[p] / delta_r).astype(int)
         h = positions[p] - np.array([i, j]) * delta_r
         h_n = delta_r - h
         rho[i, j] = ro_c * (np.multiply.reduce(h_n) / dxdy)
+<<<<<<< HEAD
         a = rho[i, j]
         rho[i, (j+1) % n[1]] = ro_c * (h_n[0] * h[1] / dxdy)
         rho[(i+1) % n[0], j] = ro_c * (h_n[1] * h[0] / dxdy)
         rho[(i+1) % n[0], (j+1) % n[1]] = ro_c * (np.multiply.reduce(h) / dxdy)
 
+=======
+        rho[i, (j+1) % n[1]] = ro_c * (h_n[0] * h[1] / dxdy)
+        rho[(i+1) % n[0], j] = ro_c * (h_n[1] * h[0] / dxdy)
+        rho[(i+1) % n[0], (j+1) % n[1]] = ro_c * (np.multiply.reduce(h) / dxdy)
+>>>>>>> bf5b899665addb7b819ae02a0a648732e875a52e
     return rho
 
 
@@ -99,7 +118,11 @@ def potential(rho: np.ndarray):
         for m in range(n[1]):
             denom = dy_2 * (2.0 - Wn - 1.0 / Wn) + dx_2 * (2.0 - Wm - 1.0 / Wm)
             if denom:
+<<<<<<< HEAD
                 phi_k[ni, m] = rho_k[ni, m] * (dx_2 * dy_2) / denom
+=======
+                phi_k[n, m] = rho_k[n, m] * (dx_2 * dy_2) / denom
+>>>>>>> bf5b899665addb7b819ae02a0a648732e875a52e
             Wm *= Wy
         Wn *= Wx
 
@@ -140,6 +163,7 @@ def field_particles(field: np.ndarray, positions: np.array):
     """
     dx, dy = delta_r
     Nx, Ny = n
+<<<<<<< HEAD
     E = np.empty([N, 3])
     for p in range(N):
         i = int(np.floor(positions[p][0] / dx))
@@ -148,6 +172,16 @@ def field_particles(field: np.ndarray, positions: np.array):
         hy = positions[p][1] - (j * dy)
         nxt_i = int((i + 1) % Nx)
         nxt_j = int((j + 1) % Ny)
+=======
+    E = np.empty_like([N, 3])
+    for p in range(N):
+        i = np.floor(positions[p][0] / dx)
+        j = np.floor(positions[p][1] / dy)
+        hx = positions[p][0] - (i * dx)
+        hy = positions[p][1] - (j * dy)
+        nxt_i = (i + 1) % Nx
+        nxt_j = (j + 1) % Ny
+>>>>>>> bf5b899665addb7b819ae02a0a648732e875a52e
         A = (dx - hx) * (dy - hy)
         B = (dx - hx) * hy
         C = hx * (dy - hy)
@@ -174,7 +208,11 @@ def boris(velocities, E, dt, direction):
 def update(positions, velocities, E, dt):
     velocities = boris(velocities, E, dt, direction=1)
     for p in range(N):
+<<<<<<< HEAD
         positions[p] += velocities[p][:2] * dt
+=======
+        positions[p] += velocities[p] * dt
+>>>>>>> bf5b899665addb7b819ae02a0a648732e875a52e
         positions[p][0] = positions[p][0] % L[0]
         positions[p][1] = positions[p][1] % L[1]
     return velocities, positions
