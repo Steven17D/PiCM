@@ -38,7 +38,7 @@ def ifft(v: np.ndarray) -> np.ndarray:
     return np.fft.ifft(v)
 
 
-def density(positions: np.ndarray, n, delta_r, ro_c, dxdy):
+def density(positions: np.ndarray, n, delta_r, rho_c, dxdy):
     """
     Calculate the density of particles
     TODO: add charges list
@@ -46,18 +46,22 @@ def density(positions: np.ndarray, n, delta_r, ro_c, dxdy):
     :return:
     """
     rho = np.zeros(n)
-    for position in positions:
-        if np.isnan(position[0]):
-            pass
-        i, j = np.floor(position / delta_r).astype(int)
-        h = position - np.array([i, j]) * delta_r
-        h_n = delta_r - h
-        rho[i, j] += ro_c * (np.multiply.reduce(h_n) / dxdy)
-        rho[i, (j+1) % n[1]] += ro_c * (h_n[0] * h[1] / dxdy)
-        rho[(i+1) % n[0], j] += ro_c * (h_n[1] * h[0] / dxdy)
-        rho[(i+1) % n[0], (j+1) % n[1]] += ro_c * (np.multiply.reduce(h) / dxdy)
+    ijs = np.floor(positions / delta_r).astype(int)
+    ijs_right = (ijs + [1, 0]) % n
+    ijs_up = (ijs + [0, 1]) % n
+    ijs_diag = (ijs + [1, 1]) % n
+    h = positions - ijs * delta_r
+    h_n = delta_r - h
+    rhos = np.full((positions.shape[0], *rho.shape), rho)
+    sub_rho = [h_n[:, 0] * h_n[:, 1], h_n[:, 0] * h[:, 1], h_n[:, 1] * h[:, 0], h[:, 0] * h[:, 1]]
+    indices = np.array([ijs, ijs_up, ijs_right, ijs_diag])
+    rho_index = np.arange(positions.shape[0])
+    rho_index = np.broadcast_to(rho_index, (4, *rho_index.shape))
+    flat_indices = indices[:, :, 0] + rho.shape[1] * indices[:, :, 1] + rho.size * rho_index
 
-    return rho
+    np.put(rhos, flat_indices, sub_rho)
+    rho = rhos.sum(axis=0)
+    return rho * rho_c / dxdy
 
 
 def potential(rho: np.ndarray, n, delta_r):
@@ -174,14 +178,6 @@ def setup(Lx, Ly, v_d, N):
     velocities[:, 0] = [get_random_value(maxwell_distribution, -v_d*2, v_d*2, v_d) for _ in range(N)]
     return positions, velocities
 
-"""
-TODO:
-Change particle for to:
-A = [x1, x2, x3, ...]
-A1 = round(A/dx)  # This is the affected cell
-A2 = (A1 + 1) % Lx  # This is right
-A3 = (A1 - 1) % Lx  # This is left
-"""
 
 def main():
     # Table II.

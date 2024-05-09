@@ -7,12 +7,15 @@ from acceptance_rejection import get_random_value
 n_e = 0.5
 v_th = 1
 v_d = 5
+
+
 def maxwell_distribution(v):
     return (
-        (n_e / np.sqrt(2 * np.pi * (v_th ** 2))) * (
-            np.exp((-(v - v_d) ** 2)/(2 * (v_th ** 2))) + np.exp((-(v + v_d) ** 2)/(2 * (v_th ** 2)))
-        )
+            (n_e / np.sqrt(2 * np.pi * (v_th ** 2))) * (
+            np.exp((-(v - v_d) ** 2) / (2 * (v_th ** 2))) + np.exp((-(v + v_d) ** 2) / (2 * (v_th ** 2)))
     )
+    )
+
 
 class MyTestCase(unittest.TestCase):
     def test_get_random_value(self):

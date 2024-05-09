@@ -38,6 +38,17 @@ class TestDensity(unittest.TestCase):
         ]).astype(np.float64)
         np.testing.assert_allclose(rho, expected)
 
+    def test_two_particles_same_cell(self):
+        n = np.array([3, 3])
+        positions = np.array([[0.5, 0.5], [0.5, 0.5]])
+        rho = density(positions, n, np.array([1., 1.]), 1.0, 1.0)
+        expected = np.array([
+            [0.5, 0.5, 0],
+            [0.5, 0.5, 0],
+            [0, 0, 0],
+        ]).astype(np.float64)
+        np.testing.assert_allclose(rho, expected)
+
     def test_single_particle_center(self):
         n = np.array([3, 3])
         positions = np.array([[1.5, 1.5]])
