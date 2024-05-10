@@ -1,6 +1,7 @@
 import unittest
 
 import numpy as np
+from matplotlib import pyplot as plt
 
 from main import density
 
@@ -88,6 +89,25 @@ class TestDensity(unittest.TestCase):
         positions = np.random.uniform(0, 3, (N, 2))
         rho = density(positions, n, np.array([1., 1.]), 1.0, 1.0)
         self.assertEqual(rho.sum(), N)
+
+    def test_multiple_particles_field(self):
+        Lx = Ly = 64
+        dx = dy = 1
+        x, y = np.meshgrid(np.arange(0, Lx), np.arange(0, Ly))
+        positions = np.random.uniform(0, Ly, (100, 2))
+        rho = density(positions, np.array([Lx, Ly]), np.array([1., 1.]), 1.0, 1.0)
+        fig, ax = plt.subplots()
+        ax.title.set_text(r"$\omega_{\rm{pe}}$")
+        color_map = ax.pcolormesh(x, y, rho, shading="gouraud", cmap="jet")
+        bar = plt.colorbar(color_map, cax=ax)
+        ax.set_xlim(0, Lx - dx)
+        ax.set_ylim(0, Ly - dy)
+        ax.set_xlabel(r"$x / \lambda_D$", fontsize=25)
+        ax.set_ylabel(r"$y / \lambda_D$", fontsize=25)
+        bar.set_label(r"$\rho$", fontsize=25)
+        ax.scatter(positions[:, 0], positions[:, 1], s=5, c='r', marker='o')
+        ax.set_aspect("equal")
+        plt.show()
 
 
 

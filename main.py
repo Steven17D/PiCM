@@ -152,10 +152,10 @@ def field_particles(field: np.ndarray, positions: np.array, n, delta_r):
 
 def boris(velocities, E, dt, direction, q_over_m, B):
     dt = 0.5 * direction * dt
+    t = 0.5 * q_over_m * B * dt
+    t_2 = np.linalg.norm(t) * np.linalg.norm(t)
+    s = (2.0 * t) / (1.0 + t_2)
     for p, velocity in enumerate(velocities):
-        t = 0.5 * q_over_m * B * dt
-        t_2 = np.linalg.norm(t) * np.linalg.norm(t)
-        s = (2.0 * t) / (1.0 + t_2)
         v_minus = velocity + 0.5 * q_over_m * E[p] * dt
         v_prime = v_minus + np.cross(v_minus, t)
         v_plus = v_minus + np.cross(v_prime, s)
@@ -185,9 +185,9 @@ def main():
     n_x = n_y = 64
     dx, dy = Lx / n_x, Ly / n_y  # delta_x and delta_y
     dt = 0.1  # TODO: Change 0.05 / omega_pe
-    steps = 1000
+    steps = 1
     v_d = 5.0 * v_th  # Drift velocity
-    N = 256  # TODO: Change to 10 ** 6
+    N = 64000  # TODO: Change to 10 ** 6
 
     L = np.array([Lx, Ly])
     n = np.array([n_x, n_y])
@@ -198,14 +198,13 @@ def main():
     assert 0.5 * delta_r[0] < debye_length
     assert 0.5 * delta_r[1] < debye_length
 
-    n_e = 0.5  # TODO: Check N / np.multiply.reduce(L)
     B = np.zeros(3)
     q_over_m = 1
 
     fig, ax = plt.subplots(2, 2)
 
     positions, velocities = setup(Lx, Ly, v_d, N)
-    plot_initial_conditions(ax, Lx, Ly, positions, v_d, velocities, 0)
+    plot_positions_and_velocities(ax, Lx, Ly, positions, v_d, velocities, 0)
 
     for step in tqdm(range(steps)):
         rho = density(positions, n, delta_r, rho_c, dxdy)
@@ -217,11 +216,28 @@ def main():
         update(positions, velocities, e_field_p, dt, L, q_over_m, B)
         boris(velocities, e_field_p, dt, 1, q_over_m, B)
 
-    plot_initial_conditions(ax, Lx, Ly, positions, v_d, velocities, 1)
+    plot_positions_and_velocities(ax, Lx, Ly, positions, v_d, velocities, 1)
+    plt.show()
+
+    plot_color_mesh(Lx, Ly, dx, dy, phi)
+
+
+def plot_color_mesh(Lx, Ly, dx, dy, phi):
+    x, y = np.meshgrid(np.arange(0, Lx), np.arange(0, Ly))
+    plt.figure()
+    plt.title(r"$\omega_{\rm{pe}}$", fontsize=25)
+    color_map = plt.pcolormesh(x, y, phi, shading="gouraud", cmap="jet")
+    bar = plt.colorbar(color_map, ax=plt.gca())
+    plt.xlim(0, Lx - dx)
+    plt.ylim(0, Ly - dy)
+    plt.xlabel(r"$x / \lambda_D$", fontsize=25)
+    plt.ylabel(r"$y / \lambda_D$", fontsize=25)
+    bar.set_label(r"$\phi / (T_e / e)$", fontsize=25)
+    plt.gca().set_aspect("equal")
     plt.show()
 
 
-def plot_initial_conditions(ax, Lx, Ly, positions, v_d, velocities, i):
+def plot_positions_and_velocities(ax, Lx, Ly, positions, v_d, velocities, i):
     ax[0, i].scatter(positions[:, 0], positions[:, 1], c=np.where(velocities[:, 0] < 0, 'b', 'r'), s=5, linewidth=0)
     ax[0, i].set_xlim([0, Lx])
     ax[0, i].set_ylim([0, Ly])
