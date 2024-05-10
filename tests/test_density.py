@@ -3,7 +3,8 @@ import unittest
 import numpy as np
 from matplotlib import pyplot as plt
 
-from main import density
+from main import density, boris, field_nodes, field_particles, potential
+
 
 class TestDensity(unittest.TestCase):
     def test_single_particle(self):
@@ -90,7 +91,7 @@ class TestDensity(unittest.TestCase):
         rho = density(positions, n, np.array([1., 1.]), 1.0, 1.0)
         self.assertEqual(rho.sum(), N)
 
-    def test_multiple_particles_field(self):
+    def test_multiple_particles_density(self):
         Lx = Ly = 64
         dx = dy = 1
         x, y = np.meshgrid(np.arange(0, Lx), np.arange(0, Ly))
@@ -108,6 +109,50 @@ class TestDensity(unittest.TestCase):
         ax.scatter(positions[:, 0], positions[:, 1], s=5, c='r', marker='o')
         ax.set_aspect("equal")
         plt.show()
+
+class TestPotential(unittest.TestCase):
+
+    def setUp(self):
+        super().setUp()
+
+    def test_single_particles_phi(self):
+        self._plot_phi(1, show_positions=True)
+
+    def test_multiple_particles_phi(self):
+        N = 10 ** 1
+        self._plot_phi(N, show_positions=True)
+
+    def test_many_particles_phi(self):
+        N = 10 ** 6
+        self._plot_phi(N)
+
+    def _plot_phi(self, N, show_positions=False):
+        Lx = Ly = n_x = n_y = 64
+        dx = dy = 1
+        delta_r = np.array([dx, dy])
+        n = np.array([n_x, n_y])
+        x, y = np.meshgrid(np.arange(0, Lx), np.arange(0, Ly))
+        positions = np.random.uniform(0, Ly, (N, 2))
+        rho = density(positions, np.array([Lx, Ly]), delta_r, 1.0, 1.0)
+        # TODO: Plot rho
+        phi = potential(rho, n, delta_r)
+        fig, ax = plt.subplots()
+        ax.title.set_text(r"$\omega_{\rm{pe}}$")
+        color_map = ax.pcolormesh(x, y, phi, shading="gouraud", cmap="jet")
+        bar = plt.colorbar(color_map)
+        ax.set_xlim(0, Lx - dx)
+        ax.set_ylim(0, Ly - dy)
+        ax.set_xlabel(r"$x / \lambda_D$", fontsize=25)
+        ax.set_ylabel(r"$y / \lambda_D$", fontsize=25)
+        bar.set_label(r"$\phi$", fontsize=25)
+        if show_positions:
+            ax.scatter(positions[:, 0], positions[:, 1], s=5, c='r', marker='o')
+        ax.set_aspect("equal")
+        plt.show()
+
+    # def test_boris(self):
+    #
+    #     boris(velocities, E, 0.05, 1, 1, np.array([0, 0, 1]))
 
 
 

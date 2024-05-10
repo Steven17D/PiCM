@@ -6,6 +6,7 @@ from itertools import product
 import matplotlib
 import numpy as np
 from matplotlib import pyplot as plt
+from line_profiler_pycharm import profile
 from tqdm import tqdm
 
 matplotlib.style.use('classic')
@@ -37,16 +38,21 @@ def fft(v: np.ndarray) -> np.ndarray:
 def ifft(v: np.ndarray) -> np.ndarray:
     return np.fft.ifft(v)
 
-
+@profile
 def density(positions: np.ndarray, n, delta_r, rho_c, dxdy):
     """
     Calculate the density of particles
     TODO: add charges list
+    sub_rho = np.rollaxis(np.array(sub_rho), 1)
+    sub_rho = sub_rho.reshape((positions.shape[0], 2, 2))
+    sub_rho_padded = np.pad(sub_rho, ((0, 0), (0, n[0]-2), (0, n[1]-2)), 'constant', constant_values=(0,))
+    rhos = np.roll(np.roll(sub_rho_padded, ijs[:, 0], axis=1), ijs[:, 1], axis=2)
+
     :param positions:
     :return:
     """
     rho = np.zeros(n)
-    ijs = np.floor(positions / delta_r).astype(int)
+    ijs = np.round(positions / delta_r).astype(int)  # TODO: Check round of floor
     ijs_right = (ijs + [1, 0]) % n
     ijs_up = (ijs + [0, 1]) % n
     ijs_diag = (ijs + [1, 1]) % n
@@ -61,7 +67,7 @@ def density(positions: np.ndarray, n, delta_r, rho_c, dxdy):
 
     np.put(rhos, flat_indices, sub_rho)
     rho = rhos.sum(axis=0)
-    return rho * rho_c / dxdy
+    return rho * (rho_c / dxdy)
 
 
 def potential(rho: np.ndarray, n, delta_r):
@@ -74,12 +80,12 @@ def potential(rho: np.ndarray, n, delta_r):
     rho = rho.astype(complex)
 
     # FFT rho to rho_k
-    rho_k = np.empty_like(rho, dtype=complex)
     for xi in range(n[0]):
-        rho_k[xi, :] = fft(rho[xi, :])
+        rho[xi, :] = fft(rho[xi, :])
     for yi in range(n[1]):
-        rho_k[:, yi] = fft(rho[:, yi])
+        rho[:, yi] = fft(rho[:, yi])
 
+    rho_k = rho
     # Calculate phi_k from rho_k
     Wx = np.exp(2j * np.pi / n[0])
     Wy = np.exp(2j * np.pi / n[1])
@@ -96,13 +102,12 @@ def potential(rho: np.ndarray, n, delta_r):
         Wn *= Wx
 
     # Inverse FFT phi_k to phi
-    phi = np.empty_like(phi_k, dtype=complex)
     for xi in range(n[0]):
-        phi[xi, :] = ifft(phi_k[xi, :])
+        phi_k[xi, :] = ifft(phi_k[xi, :])
     for yi in range(n[1]):
-        phi[:, yi] = ifft(phi_k[:, yi])
+        phi_k[:, yi] = ifft(phi_k[:, yi])
 
-    return np.real(phi)
+    return np.real(phi_k)
 
 
 def field_nodes(phi: np.ndarray, n, delta_r):
@@ -150,29 +155,23 @@ def field_particles(field: np.ndarray, positions: np.array, n, delta_r):
     return E / (dx * dy)
 
 
-def boris(velocities, E, dt, direction, q_over_m, B):
-    dt = 0.5 * direction * dt
+def boris(velocities, E, dt, q_over_m, B):
     u = 0.5 * q_over_m * B * dt
     s = (2.0 * u) / (1.0 + np.dot(u, u))
-    # v_minus = velocities + 0.5 * q_over_m * E * dt
-    for p, velocity in enumerate(velocities):
-        v_minus = velocity + 0.5 * q_over_m * E[p] * dt
-        v_prime = np.array([v_minus[0] + (v_minus[1] * u[2] - v_minus[2] * u[1]),  # np.cross(v_minus, u)
-                   v_minus[1] + (v_minus[2] * u[0] - v_minus[0] * u[2]),
-                   0])  # np.cross(v_minus, u)
-        v_plus = np.array([v_minus[0] + (v_prime[1] * s[2] - v_prime[2] * s[1]),  # np.cross(v_prime, s)
-                  v_minus[1] + (v_prime[2] * s[0] - v_prime[0] * s[2]), 0])  # np.cross(v_prime, s)
-        velocities[p] = v_plus + 0.5 * q_over_m * E[p] * dt
-    # return velocities
+    qEt2m = 0.5 * q_over_m * E * dt
+    v_minus = velocities + qEt2m
+    v_prime = v_minus + np.cross(v_minus, u)
+    v_plus = v_minus + np.cross(v_prime, s)
+    return v_plus + qEt2m
 
 
 def update(positions, velocities, E, dt, L, q_over_m, B):
-    boris(velocities, E, dt, 1, q_over_m, B)
+    velocities = boris(velocities, E, dt, q_over_m, B)
     for p, position in enumerate(positions, start=0):
         positions[p] += velocities[p][:2] * dt
         positions[p][0] = positions[p][0] % L[0]
         positions[p][1] = positions[p][1] % L[1]
-    # return velocities, positions
+    return positions, velocities
 
 
 def setup(Lx, Ly, v_d, N):
@@ -181,16 +180,16 @@ def setup(Lx, Ly, v_d, N):
     velocities[:, 0] = [get_random_value(maxwell_distribution, -v_d*2, v_d*2, v_d) for _ in range(N)]
     return positions, velocities
 
-
+@profile
 def main():
     # Table II.
     Lx = Ly = 64 * debye_length  # size of the system
     n_x = n_y = 64
     dx, dy = Lx / n_x, Ly / n_y  # delta_x and delta_y
     dt = 0.1  # TODO: Change 0.05 / omega_pe
-    steps = 1000
+    steps = 1
     v_d = 5.0 * v_th  # Drift velocity
-    N = 512  # TODO: Change to 10 ** 6
+    N = 51200  # TODO: Change to 10 ** 6
 
     L = np.array([Lx, Ly])
     n = np.array([n_x, n_y])
@@ -216,9 +215,9 @@ def main():
         e_field_n = field_nodes(phi, n, delta_r)
         e_field_p = field_particles(e_field_n, positions, n, delta_r)
         if step == 0:
-            boris(velocities, e_field_p, dt, -1, q_over_m, B)
-        update(positions, velocities, e_field_p, dt, L, q_over_m, B)
-        boris(velocities, e_field_p, dt, 1, q_over_m, B)
+            velocities = boris(velocities, e_field_p, -0.5 * dt, q_over_m, B)
+        positions, velocities = update(positions, velocities, e_field_p, dt, L, q_over_m, B)
+        velocities = boris(velocities, e_field_p, 0.5 * dt, q_over_m, B)
 
     plot_positions_and_velocities(ax, Lx, Ly, positions, v_d, velocities, 1)
     plt.show()
