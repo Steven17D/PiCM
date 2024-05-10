@@ -152,13 +152,16 @@ def field_particles(field: np.ndarray, positions: np.array, n, delta_r):
 
 def boris(velocities, E, dt, direction, q_over_m, B):
     dt = 0.5 * direction * dt
-    t = 0.5 * q_over_m * B * dt
-    t_2 = np.linalg.norm(t) * np.linalg.norm(t)
-    s = (2.0 * t) / (1.0 + t_2)
+    u = 0.5 * q_over_m * B * dt
+    s = (2.0 * u) / (1.0 + np.dot(u, u))
+    # v_minus = velocities + 0.5 * q_over_m * E * dt
     for p, velocity in enumerate(velocities):
         v_minus = velocity + 0.5 * q_over_m * E[p] * dt
-        v_prime = v_minus + np.cross(v_minus, t)
-        v_plus = v_minus + np.cross(v_prime, s)
+        v_prime = np.array([v_minus[0] + (v_minus[1] * u[2] - v_minus[2] * u[1]),  # np.cross(v_minus, u)
+                   v_minus[1] + (v_minus[2] * u[0] - v_minus[0] * u[2]),
+                   0])  # np.cross(v_minus, u)
+        v_plus = np.array([v_minus[0] + (v_prime[1] * s[2] - v_prime[2] * s[1]),  # np.cross(v_prime, s)
+                  v_minus[1] + (v_prime[2] * s[0] - v_prime[0] * s[2]), 0])  # np.cross(v_prime, s)
         velocities[p] = v_plus + 0.5 * q_over_m * E[p] * dt
     # return velocities
 
@@ -185,9 +188,9 @@ def main():
     n_x = n_y = 64
     dx, dy = Lx / n_x, Ly / n_y  # delta_x and delta_y
     dt = 0.1  # TODO: Change 0.05 / omega_pe
-    steps = 1
+    steps = 1000
     v_d = 5.0 * v_th  # Drift velocity
-    N = 64000  # TODO: Change to 10 ** 6
+    N = 512  # TODO: Change to 10 ** 6
 
     L = np.array([Lx, Ly])
     n = np.array([n_x, n_y])
@@ -199,6 +202,7 @@ def main():
     assert 0.5 * delta_r[1] < debye_length
 
     B = np.zeros(3)
+    B[2] = 0.1
     q_over_m = 1
 
     fig, ax = plt.subplots(2, 2)
