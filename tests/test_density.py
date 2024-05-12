@@ -7,7 +7,7 @@ from main import density, boris, field_nodes, field_particles, potential, update
 
 
 def local_initial_state():
-    positions_file = r"C:\Projects\PiCM-cpp\electrosctatic\two_stream.dat"
+    positions_file = r"electrosctatic\two_stream.dat"
     positions_text = open(positions_file, "r").readlines()
     positions = np.empty((len(positions_text), 2))
     velocities = np.empty((len(positions_text), 3))
@@ -159,7 +159,7 @@ class TestDensity(unittest.TestCase):
 
     def test_cpp(self):
         positions, _, charges, _ = local_initial_state()
-        expected_rho = load_rho(r"C:\Projects\PiCM-cpp\electrosctatic\rho\step_0_.dat")
+        expected_rho = load_rho(r"electrosctatic\rho\step_0_.dat")
         Lx = Ly = 64
         rho = density(positions, charges, np.array([Lx, Ly]), np.array([1., 1.]), 1.0, 1.0)
         np.testing.assert_allclose(rho, expected_rho, rtol=1e-5)
@@ -168,8 +168,8 @@ class TestDensity(unittest.TestCase):
 class TestPotential(unittest.TestCase):
 
     def test_cpp(self):
-        rho = load_rho(r"C:\Projects\PiCM-cpp\electrosctatic\rho\step_0_.dat")
-        expected_phi = load_rho(r"C:\Projects\PiCM-cpp\electrosctatic\phi\step_0_.dat")
+        rho = load_rho(r"electrosctatic\rho\step_0_.dat")
+        expected_phi = load_rho(r"electrosctatic\phi\step_0_.dat")
         n = np.array([64, 64])
         phi = potential(rho, n, np.array([1., 1.]))
         np.testing.assert_allclose(phi, expected_phi, rtol=0.00275092)
@@ -217,8 +217,8 @@ class TestField(unittest.TestCase):
         delta_r = np.array([dx, dy])
         n = np.array([n_x, n_y])
 
-        phi = load_rho(r"C:\Projects\PiCM-cpp\electrosctatic\phi\step_0_.dat")
-        expected_field = load_field(r"C:\Projects\PiCM-cpp\electrosctatic\Efield\step_0_.dat")
+        phi = load_rho(r"electrosctatic\phi\step_0_.dat")
+        expected_field = load_field(r"electrosctatic\Efield\step_0_.dat")
         field = field_nodes(phi, n, delta_r)
         np.testing.assert_allclose(field, expected_field, atol=4.8e-06)
 
@@ -247,9 +247,9 @@ class TestPhaseSpace(unittest.TestCase):
         dt = 0.1
         B = np.array([0, 0, 0])
         positions, velocities, charges, moves = local_initial_state()
-        expected_field = load_field(r"C:\Projects\PiCM-cpp\electrosctatic\Efield\step_0_.dat")
+        expected_field = load_field(r"electrosctatic\Efield\step_0_.dat")
         expected_positions, expected_velocities = load_space(
-            r"C:\Projects\PiCM-cpp\electrosctatic\phase_space\step_0_.dat")
+            r"electrosctatic\phase_space\step_0_.dat")
         e_field_p = field_particles(expected_field, positions, moves, n, delta_r)
         velocities = boris(velocities, charges, moves, e_field_p, B, -0.5 * dt)
         positions, velocities = update(positions, velocities, charges, moves, e_field_p, B, L, dt)

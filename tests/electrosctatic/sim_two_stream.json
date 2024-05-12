@@ -1,0 +1,24 @@
+{
+  "N": 99856,
+  "steps": 500,
+  "grid_size": [
+    64,
+    64
+  ],
+  "sys_length": [
+    64,
+    64
+  ],
+  "ss_frequency": 50,
+  "dt": 0.1,
+  "sample": "electrosctatic/two_stream.dat",
+  "output": "electrosctatic",
+  "results": [
+    "phase_space", "charge_density", "electric_potential", "electric_field", "space"
+  ],
+  "Bfield": [
+    0.0,
+    0.0,
+    0.0
+  ]
+}
