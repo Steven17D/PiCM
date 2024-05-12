@@ -25,9 +25,9 @@ def maxwell_distribution(v):
     v_d = 5
     n_e = 0.5  # In order to normalize area
     return (
-        (n_e / np.sqrt(2 * np.pi * (v_th ** 2))) * (
-            np.exp((-(v - v_d) ** 2)/(2 * (v_th ** 2))) + np.exp((-(v + v_d) ** 2)/(2 * (v_th ** 2)))
-        )
+            (n_e / np.sqrt(2 * np.pi * (v_th ** 2))) * (
+            np.exp((-(v - v_d) ** 2) / (2 * (v_th ** 2))) + np.exp((-(v + v_d) ** 2) / (2 * (v_th ** 2)))
+    )
     )
 
 
@@ -37,6 +37,10 @@ def fft(v: np.ndarray) -> np.ndarray:
 
 def ifft(v: np.ndarray) -> np.ndarray:
     return np.fft.ifft(v)
+
+
+rhos = None  # Rhos are initialized once for performance
+
 
 @profile
 def density(positions: np.ndarray, n, delta_r, rho_c, dxdy):
@@ -51,14 +55,16 @@ def density(positions: np.ndarray, n, delta_r, rho_c, dxdy):
     :param positions:
     :return:
     """
+    global rhos
     rho = np.zeros(n)
-    ijs = np.round(positions / delta_r).astype(int)  # TODO: Check round of floor
+    ijs = np.floor(positions / delta_r).astype(int)  # TODO: Check round of floor
     ijs_right = (ijs + [1, 0]) % n
     ijs_up = (ijs + [0, 1]) % n
     ijs_diag = (ijs + [1, 1]) % n
     h = positions - ijs * delta_r
     h_n = delta_r - h
-    rhos = np.full((positions.shape[0], *rho.shape), rho)
+    if rhos is None:
+        rhos = np.full((positions.shape[0], *rho.shape), rho)
     sub_rho = [h_n[:, 0] * h_n[:, 1], h_n[:, 0] * h[:, 1], h_n[:, 1] * h[:, 0], h[:, 0] * h[:, 1]]
     indices = np.array([ijs, ijs_up, ijs_right, ijs_diag])
     rho_index = np.arange(positions.shape[0])
@@ -66,10 +72,13 @@ def density(positions: np.ndarray, n, delta_r, rho_c, dxdy):
     flat_indices = indices[:, :, 0] + rho.shape[1] * indices[:, :, 1] + rho.size * rho_index
 
     np.put(rhos, flat_indices, sub_rho)
-    rho = rhos.sum(axis=0)
+    np.add.reduce(rhos, axis=0, out=rho)
+    np.put(rhos, flat_indices, 0)
+
     return rho * (rho_c / dxdy)
 
 
+@profile
 def potential(rho: np.ndarray, n, delta_r):
     """
     Calculate the potential (phi) from the charge density (rho)
@@ -110,6 +119,7 @@ def potential(rho: np.ndarray, n, delta_r):
     return np.real(phi_k)
 
 
+@profile
 def field_nodes(phi: np.ndarray, n, delta_r):
     E = np.zeros([*phi.shape, 3])
 
@@ -128,6 +138,7 @@ def field_nodes(phi: np.ndarray, n, delta_r):
     return E
 
 
+@profile
 def field_particles(field: np.ndarray, positions: np.array, n, delta_r):
     """
     TODO: Add moves
@@ -136,25 +147,19 @@ def field_particles(field: np.ndarray, positions: np.array, n, delta_r):
     :return:
     """
     dx, dy = delta_r
-    Nx, Ny = n
     E = np.zeros([len(positions), 3])
-    for p, position in enumerate(positions, start=0):
-        i = int(np.floor(positions[p][0] / dx))
-        j = int(np.floor(positions[p][1] / dy))
-        hx = positions[p][0] - (i * dx)
-        hy = positions[p][1] - (j * dy)
-        nxt_i = int((i + 1) % Nx)
-        nxt_j = int((j + 1) % Ny)
-        A = (dx - hx) * (dy - hy)
-        B = (dx - hx) * hy
-        C = hx * (dy - hy)
-        D = hx * hy
-        E[p][0] = field[i][j][0] * A + field[i][nxt_j][0] * B + field[nxt_i][j][0] * C + field[nxt_i][nxt_j][0] * D
-        E[p][1] = field[i][j][1] * A + field[i][nxt_j][1] * B + field[nxt_i][j][1] * C + field[nxt_i][nxt_j][1] * D
-
+    ijs = np.floor(positions / dy).astype(int)
+    h = positions - ijs * delta_r
+    nxt_ijs = (ijs + 1) % n
+    A = ((dx - h[:, 0]) * (dy - h[:, 1]))[:, np.newaxis] * field[ijs[:, 0], ijs[:, 1]]
+    B = ((dx - h[:, 0]) * h[:, 1])[:, np.newaxis] * field[ijs[:, 0], nxt_ijs[:, 1]]
+    C = (h[:, 0] * (dy - h[:, 1]))[:, np.newaxis] * field[nxt_ijs[:, 0], ijs[:, 1]]
+    D = (h[:, 0] * h[:, 1])[:, np.newaxis] * field[nxt_ijs[:, 0], nxt_ijs[:, 1]]
+    E = A + B + C + D
     return E / (dx * dy)
 
 
+@profile
 def boris(velocities, E, dt, q_over_m, B):
     u = 0.5 * q_over_m * B * dt
     s = (2.0 * u) / (1.0 + np.dot(u, u))
@@ -165,31 +170,28 @@ def boris(velocities, E, dt, q_over_m, B):
     return v_plus + qEt2m
 
 
+@profile
 def update(positions, velocities, E, dt, L, q_over_m, B):
     velocities = boris(velocities, E, dt, q_over_m, B)
-    for p, position in enumerate(positions, start=0):
-        positions[p] += velocities[p][:2] * dt
-        positions[p][0] = positions[p][0] % L[0]
-        positions[p][1] = positions[p][1] % L[1]
-    return positions, velocities
+    return (positions + (velocities[:, slice(0, 2)] * dt)) % L, velocities
 
 
 def setup(Lx, Ly, v_d, N):
     positions = np.array([np.random.uniform(0, l, [N]) for l in [Lx, Ly]]).T
     velocities = np.zeros([N, 3])
-    velocities[:, 0] = [get_random_value(maxwell_distribution, -v_d*2, v_d*2, v_d) for _ in range(N)]
+    velocities[:, 0] = [get_random_value(maxwell_distribution, -v_d * 2, v_d * 2, v_d) for _ in range(N)]
     return positions, velocities
 
-@profile
+
 def main():
     # Table II.
     Lx = Ly = 64 * debye_length  # size of the system
     n_x = n_y = 64
     dx, dy = Lx / n_x, Ly / n_y  # delta_x and delta_y
     dt = 0.1  # TODO: Change 0.05 / omega_pe
-    steps = 1
+    steps = 500
     v_d = 5.0 * v_th  # Drift velocity
-    N = 51200  # TODO: Change to 10 ** 6
+    N = 1000  # TODO: Change to 10 ** 6
 
     L = np.array([Lx, Ly])
     n = np.array([n_x, n_y])
