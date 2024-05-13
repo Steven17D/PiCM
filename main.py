@@ -7,6 +7,7 @@ import matplotlib
 import numpy as np
 from matplotlib import pyplot as plt, animation
 from line_profiler_pycharm import profile
+from matplotlib.animation import FFMpegWriter
 from tqdm import tqdm
 
 matplotlib.style.use('classic')
@@ -45,11 +46,6 @@ rhos = None  # Rhos are initialized once for performance
 def density(positions: np.ndarray, charges, n, delta_r, rho_c, dxdy):
     """
     Calculate the density of particles
-    sub_rho = np.rollaxis(np.array(sub_rho), 1)
-    sub_rho = sub_rho.reshape((positions.shape[0], 2, 2))
-    sub_rho_padded = np.pad(sub_rho, ((0, 0), (0, n[0]-2), (0, n[1]-2)), 'constant', constant_values=(0,))
-    rhos = np.roll(np.roll(sub_rho_padded, ijs[:, 0], axis=1), ijs[:, 1], axis=2)
-
     :param positions:
     :return:
     """
@@ -79,8 +75,7 @@ def density(positions: np.ndarray, charges, n, delta_r, rho_c, dxdy):
     np.put(rhos, flat_indices, sub_rho)
     np.add.reduce(rhos, axis=0, out=rho)
     np.put(rhos, flat_indices, 0)
-
-    return (rho * (rho_c / (dxdy ** 2))).T / 24.37889
+    return (rho * (rho_c / (dxdy ** 2))).T * (n[0] * n[1] / positions.shape[0])
 
 
 def potential(rho: np.ndarray, n, delta_r):
@@ -163,7 +158,7 @@ def field_particles(field: np.ndarray, positions: np.array, moves, n, delta_r):
 
 def boris(velocities, charges, moves, E, B, dt):
     u = 0.5 * charges[:, np.newaxis] * B * dt
-    s = (2.0 * u) / (1.0 + np.linalg.norm(u, axis=1)**2)[:, np.newaxis]
+    s = (2.0 * u) / (1.0 + np.linalg.norm(u, axis=1) ** 2)[:, np.newaxis]
     qEt2m = 0.5 * charges[:, np.newaxis] * E * dt
     v_minus = velocities + qEt2m
     v_prime = v_minus + np.cross(v_minus, u)
@@ -176,10 +171,22 @@ def update(positions, velocities, charges, moves, E, B, L, dt):
     return (positions + (velocities[:, slice(0, 2)] * dt)) % L, velocities
 
 
-def setup(Lx, Ly, v_d, N):
-    positions = np.array([np.random.uniform(0, l, [N]) for l in [Lx, Ly]]).T
+def simulate(positions, velocities, charges, moves, L, n, delta_r, dxdy, B, rho_c, dt, steps):
+    for step in tqdm(range(steps)):
+        rho = density(positions, charges, n, delta_r, rho_c, dxdy)
+        phi = potential(rho, n, delta_r)
+        e_field_n = field_nodes(phi, n, delta_r)
+        e_field_p = field_particles(e_field_n, positions, moves, n, delta_r)
+        if step == 0:
+            velocities = boris(velocities, charges, moves, e_field_p, B, -0.5 * dt)
+        positions, velocities = update(positions, velocities, charges, moves, e_field_p, B, L, dt)
+        velocities = boris(velocities, charges, moves, e_field_p, B, 0.5 * dt)
+        yield positions, velocities, rho, phi, e_field_n, step
+
+
+def setup(L, v_d, N):
+    positions = np.array([np.random.uniform(0, l, [N]) for l in L]).T
     velocities = np.zeros([N, 3])
-    # velocities[:, 0] = list(sorted([get_random_value(maxwell_distribution, -v_d * 2, v_d * 2, v_d) for _ in range(N)]))
     vel_zero = np.zeros(int(N / 2))
     vel_left = np.random.normal(-v_d, 1, size=int(N / 4))
     vel_right = np.random.normal(v_d, 1, size=int(N / 4))
@@ -191,16 +198,13 @@ def setup(Lx, Ly, v_d, N):
 
 def main():
     # Table II.
-    Lx = Ly = 64 * debye_length  # size of the system
-    n_x = n_y = 64
-    dx, dy = Lx / n_x, Ly / n_y  # delta_x and delta_y
+    L = np.array([1, 1]) * 64 * debye_length  # size of the system
+    n = np.array([1, 1]) * 64
     dt = 0.1  # TODO: Change 0.05 / omega_pe
     steps = 500
     v_d = 5.0 * v_th  # Drift velocity
-    N = 100000  # TODO: Change to 10 ** 6
+    N = 100000
 
-    L = np.array([Lx, Ly])
-    n = np.array([n_x, n_y])
     delta_r = L / n  # Vector of delta x and delta y
     dxdy = np.multiply.reduce(delta_r)
     q = 1  # Charge of a cell? TODO: Check
@@ -208,58 +212,52 @@ def main():
     assert 0.5 * delta_r[0] < debye_length
     assert 0.5 * delta_r[1] < debye_length
 
-    B = np.zeros(3)
-    B[2] = 0.1
+    B = np.array([0, 0, 0])
 
-    fig, ax = plt.subplots()
+    positions, velocities, charges, moves = setup(L, v_d, N)
+    movers = np.where(moves == 1)
+    color = np.where(velocities[movers, 0] < 0, 'b', 'r')
 
-    positions, velocities, charges, moves = setup(Lx, Ly, v_d, N)
-    # plot_positions_and_velocities(ax, Lx, Ly, positions, v_d, velocities, charges, 0)
-    artists = []
-    for step in tqdm(range(steps)):
-        rho = density(positions, charges, n, delta_r, rho_c, dxdy)
-        phi = potential(rho, n, delta_r)
-        e_field_n = field_nodes(phi, n, delta_r)
-        e_field_p = field_particles(e_field_n, positions, moves, n, delta_r)
-        if step == 0:
-            velocities = boris(velocities, charges, moves, e_field_p, B, -0.5 * dt)
-        positions, velocities = update(positions, velocities, charges, moves, e_field_p, B, L, dt)
-        velocities = boris(velocities, charges, moves, e_field_p, B, 0.5 * dt)
-        if step % 1 == 0:
-            artists.append(plot_color_mesh(ax, Lx, Ly, dx, dy, phi))
+    fig, ax = plt.subplots(2, 2)
 
-    # plot_positions_and_velocities(ax, Lx, Ly, positions, v_d, velocities, charges, 1)
-    # ax.set_title(r"$\omega_{\rm{pe}}$", fontsize=25)
-    # bar = plt.colorbar(color_map, ax=plt.gca())
-    ax.set_xlim(0, Lx - dx)
-    ax.set_ylim(0, Ly - dy)
-    ax.set_xlabel(r"$x / \lambda_D$", fontsize=25)
-    ax.set_ylabel(r"$y / \lambda_D$", fontsize=25)
-    # bar.set_label(r"$\phi / (T_e / e)$", fontsize=25)
-    artists.append(plot_color_mesh(ax, Lx, Ly, dx, dy, phi))
-    ani = animation.ArtistAnimation(fig=fig, artists=artists, interval=400)
-    ani.save('test.mp4', fps=24)
+    ax[0, 0].set_xlim([0, L[0]])
+    ax[0, 0].set_ylim([-v_d * 2, v_d * 2])
+    ax[0, 0].set_xlabel(r"$x / \lambda_D$")
+    ax[0, 0].set_ylabel(r"$v_x / v_{th}$")
+
+    ax[0, 1].set_title(r"$\omega_{\rm{pe}}$")
+    ax[0, 1].set_xlim(0, (L - delta_r)[0])
+    ax[0, 1].set_ylim(0, (L - delta_r)[1])
+    ax[0, 1].set_xlabel(r"$x / \lambda_D$")
+    ax[0, 1].set_ylabel(r"$y / \lambda_D$")
+    rho = density(positions, charges, n, delta_r, rho_c, dxdy)
+    phi = potential(rho, n, delta_r)
+    color_map = ax[0, 1].pcolormesh(phi, shading="gouraud", cmap="jet", vmin=-25, vmax=25)
+    bar = plt.colorbar(color_map, ax=ax[0, 1])
+    bar.set_label(r"$\phi / (T_e / e)$")
+
+    scatter = ax[0, 0].scatter(positions[movers, 0].T.squeeze(), velocities[movers, 0].T.squeeze(),
+                               c=color.T.squeeze(), s=5, linewidth=0)
+
+    metadata = dict(title='Movie', artist='codinglikemad')
+    writer = FFMpegWriter(fps=24, metadata=metadata)
+    max_phi = 0
+    min_phi = 0
+    with writer.saving(fig, 'Movie.mp4', 200):
+        for positions, velocities, rho, phi, e_field_n, step in \
+                simulate(positions, velocities, charges, moves, L, n, delta_r, dxdy, B, rho_c, dt, steps):
+            if step % 1 != 0:
+                continue
+            color_map.update({'array': phi.ravel()})
+            scatter.set_offsets(np.c_[positions[movers, 0].T.squeeze(), velocities[movers, 0].T.squeeze()])
+            fig.canvas.draw_idle()
+            writer.grab_frame()
+            min_phi = min(min_phi, np.min(phi))
+            max_phi = max(max_phi, np.max(phi))
+    print('min_phi', min_phi)
+    print('max_phi', max_phi)
+    plt.show()
     plt.close()
-
-
-def plot_color_mesh(ax, Lx, Ly, dx, dy, phi):
-    x, y = np.meshgrid(np.arange(0, Lx), np.arange(0, Ly))
-    color_map = ax.pcolormesh(x, y, phi, shading="gouraud", cmap="jet")
-
-    # ax.gca().set_aspect("equal")
-    return [color_map]
-
-def plot_positions_and_velocities(ax, Lx, Ly, positions, v_d, velocities, charges, i):
-    ax[0, i].scatter(positions[:, 0], positions[:, 1], c=np.where(charges < 0, 'b', 'r'), s=5, linewidth=0)
-    ax[0, i].set_xlim([0, Lx])
-    ax[0, i].set_ylim([0, Ly])
-    ax[0, i].set_xlabel(r"$x / \lambda_D$")
-    ax[0, i].set_ylabel(r"$y / \lambda_D$")
-    ax[1, i].scatter(positions[:, 0], velocities[:, 0], c=np.where(charges < 0, 'b', 'r'), s=5, linewidth=0)
-    ax[1, i].set_xlim([0, Lx])
-    ax[1, i].set_ylim([-v_d * 2, v_d * 2])
-    ax[1, i].set_xlabel(r"$x / \lambda_D$")
-    ax[1, i].set_ylabel(r"$v_x / v_{th}$")
 
 
 if __name__ == '__main__':
