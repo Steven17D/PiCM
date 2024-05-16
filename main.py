@@ -203,7 +203,7 @@ def main():
     dt = 0.1  # TODO: Change 0.05 / omega_pe
     steps = 200
     v_d = 5.0 * v_th  # Drift velocity
-    N = 1000
+    N = 100000
 
     delta_r = L / n  # Vector of delta x and delta y
     dxdy = np.multiply.reduce(delta_r)
@@ -239,6 +239,9 @@ def main():
     ax[1, 0].set_xlabel(r"$v_x / v_{\rm{th}}$")
     ax[1, 0].grid()
 
+    times = np.arange(0, steps * dt, dt)
+    kinetic_energies = np.empty(steps)
+    field_energies = np.empty(steps)
     kinetic_energy_plot, = ax[1, 1].plot([], [], label="Kinetic")
     field_energy_plot, = ax[1, 1].plot([], [], label="Field")
     total_total_plot, = ax[1, 1].plot([], [], label="Total")
@@ -256,30 +259,28 @@ def main():
     writer = FFMpegWriter(fps=24, metadata=metadata)
     max_phi = 0
     min_phi = 0
-    times = np.arange(0, steps * dt, dt)
-    kinetic_energies = np.empty(steps)
-    field_energies = np.empty(steps)
     with writer.saving(fig, 'Movie.mp4', 200):
         for positions, velocities, rho, phi, e_field_n, step in \
                 simulate(positions, velocities, charges, moves, L, n, delta_r, dxdy, B, rho_c, dt, steps):
             if step % 1 != 0:
                 continue
             vx = velocities[movers, 0].T.squeeze()
-            fig.suptitle(r"$\omega_{\rm{pe}}$" + f"$t = {step * dt}$")
+            fig.suptitle(r"$\omega_{\rm{pe}}$" + f"$t = {(step * dt):.2f}$")
             color_map.update({'array': phi.ravel()})
             scatter.set_offsets(np.c_[positions[movers, 0].T.squeeze(), velocities[movers, 0].T.squeeze()])
             ax[1, 0].cla()
-            ax[1, 0].hist(velocities[movers, 0].T.squeeze(), density=True, range=(-v_d * 3, v_d * 3), bins=50, color="red")
+            ax[1, 0].hist(velocities[movers, 0].T.squeeze(), density=True, range=(-v_d * 3, v_d * 3), bins=50,
+                          color="red")
             ax[1, 0].set_ylim([0, 0.22])
             ax[1, 0].grid()
 
             kinetic_energies[step] = (np.linalg.norm(velocities, axis=1) ** 2).sum() / 2
             field_energies[step] = (rho * phi).sum() * 0.5
-            # ax[1, 1].plot(times[:step + 1], kinetic_energies[:step+1], label="Kinetic")
-            # ax[1, 1].plot(times[:step + 1], field_energies[:step+1])
+            total_energy = kinetic_energies[:step + 1] + field_energies[:step + 1]
             kinetic_energy_plot.set_data(times[:step + 1], kinetic_energies[:step+1])
             field_energy_plot.set_data(times[:step + 1], field_energies[:step+1])
-            # total_total_plot.set_data(times[:step + 1], kinetic_energies[:step+1] + field_energies[:step+1])
+            total_total_plot.set_data(times[:step + 1], total_energy)
+            ax[1, 1].set_ylim([0, total_energy.max() * 1.1])
 
             fig.canvas.draw_idle()
             writer.grab_frame()
