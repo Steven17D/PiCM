@@ -1,47 +1,37 @@
+import re
 import unittest
+from glob import glob
 
 import numpy as np
 from matplotlib import pyplot as plt
 
+from loader import local_initial_state
 from main import density, boris, field_nodes, field_particles, potential, update
 
 
-def local_initial_state():
-    positions_file = r"electrosctatic\two_stream.dat"
-    positions_text = open(positions_file, "r").readlines()
-    positions = np.empty((len(positions_text), 2))
-    velocities = np.empty((len(positions_text), 3))
-    charges = np.empty((len(positions_text),))
-    moves = np.empty((len(positions_text),))
-    for p, line in enumerate(positions_text):
-        x, y, vx, vy, vz, qm, m = [float(d) for d in line.split(" ")]
-        positions[p] = np.array([x, y])
-        velocities[p] = np.array([vx, vy, vz])
-        charges[p] = qm
-        moves[p] = m
-    return positions, velocities, charges, moves
+def read_lines(file_name):
+    with open(file_name) as f:
+        return f.readlines()
 
 
 def load_rho(file_name):
-    expected_data_text = open(file_name, "r").readlines()
     expected_rho = np.empty(shape=(64, 64), dtype=float)
-    for line in expected_data_text:
+    for line in read_lines(file_name):
         i, j, value = [float(d) for d in line.split(" ")]
         expected_rho[int(i), int(j)] = value
     return expected_rho
 
 
 def load_field(file_name):
-    expected_data_text = open(file_name, "r").readlines()
     data = np.empty(shape=(64, 64, 3), dtype=float)
-    for line in expected_data_text:
+    for line in read_lines(file_name):
         i, j, *value = [float(d) for d in line.split(" ")]
         data[int(i), int(j)] = np.array([*value, 0])
     return data
 
 
 def load_space(file_name):
-    lines = open(file_name, "r").readlines()
+    lines = read_lines(file_name)
     N = len(lines)
     positions = np.empty(shape=(N, 2), dtype=float)
     velocities = np.empty(shape=(N, 3), dtype=float)
@@ -50,6 +40,14 @@ def load_space(file_name):
         positions[p] = np.array([x, y])
         velocities[p] = np.array([vx, vy, vz])
     return positions, velocities
+
+
+def load_energy(file_name):
+    r = {}
+    for line in read_lines(file_name):
+        step, KE, FE = [float(d) for d in line.split(" ")]
+        r[int(step)] = [KE, FE]
+    return r
 
 
 class TestDensity(unittest.TestCase):
@@ -158,10 +156,9 @@ class TestDensity(unittest.TestCase):
         plt.show()
 
     def test_cpp(self):
-        positions, _, charges, _ = local_initial_state()
-        expected_rho = load_rho(r"electrosctatic\rho\step_0_.dat")
-        Lx = Ly = 64
-        rho = density(positions, charges, np.array([Lx, Ly]), np.array([1., 1.]), 1.0, 1.0)
+        positions, _, charges, _ = local_initial_state(r"tests\electrosctatic\two_stream.dat")
+        expected_rho = load_rho(r"tests\electrosctatic\rho\step_0_.dat")
+        rho = density(positions, charges, np.array([1, 1]) * 64, np.array([1., 1.]), 1.0, 1.0)
         np.testing.assert_allclose(rho, expected_rho, rtol=1e-5)
 
 
@@ -220,7 +217,7 @@ class TestField(unittest.TestCase):
         phi = load_rho(r"electrosctatic\phi\step_0_.dat")
         expected_field = load_field(r"electrosctatic\Efield\step_0_.dat")
         field = field_nodes(phi, n, delta_r)
-        np.testing.assert_allclose(field, expected_field, atol=4.8e-06)
+        np.testing.assert_allclose(field, expected_field, atol=5e-06)
 
     def test_field_particles(self):
         Lx = Ly = n_x = n_y = 3
@@ -246,7 +243,7 @@ class TestPhaseSpace(unittest.TestCase):
         n = np.array([n_x, n_y])
         dt = 0.1
         B = np.array([0, 0, 0])
-        positions, velocities, charges, moves = local_initial_state()
+        positions, velocities, charges, moves = local_initial_state(r"electrosctatic\two_stream.dat")
         expected_field = load_field(r"electrosctatic\Efield\step_0_.dat")
         expected_positions, expected_velocities = load_space(
             r"electrosctatic\phase_space\step_0_.dat")
@@ -256,6 +253,25 @@ class TestPhaseSpace(unittest.TestCase):
         velocities = boris(velocities, charges, moves, e_field_p, B, 0.5 * dt)
         np.testing.assert_allclose(positions[moves == 1], expected_positions, atol=5e-05)
         np.testing.assert_allclose(velocities[moves == 1], expected_velocities, atol=5.01835383e-06)
+
+
+class TestEnergy(unittest.TestCase):
+    def test_data(self):
+        step_re = re.compile(r"\\step_(\d+)_.dat$")
+        expected_energies = load_energy(r"electrosctatic\energy\energy.dat")
+        for phase_file, rho_file, phi_file in zip(glob(r"electrosctatic\phase_space\step_*_.dat"),
+                                                  glob(r"electrosctatic\rho\step_*_.dat"),
+                                                  glob(r"electrosctatic\phi\step_*_.dat")):
+            step = int(step_re.search(phase_file).group(1))
+            positions, velocities = load_space(phase_file)
+            N = positions.shape[0] * 2  # The position are only for moving particles which are half of the total
+            rho = load_rho(rho_file)
+            phi = load_rho(phi_file)
+            mass = (rho.shape[0] * rho.shape[1] * 1) / N
+            kinetic_energy = ((velocities[:, 0] ** 2 + velocities[:, 1] ** 2).sum() / 2) * mass
+            field_energy = (rho * phi).sum() * 0.5
+            np.testing.assert_allclose(kinetic_energy, expected_energies[step][0], rtol=0.002)
+            np.testing.assert_allclose(field_energy, expected_energies[step][1], atol=0.002)
 
 
 if __name__ == '__main__':

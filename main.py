@@ -10,6 +10,8 @@ from line_profiler_pycharm import profile
 from matplotlib.animation import FFMpegWriter
 from tqdm import tqdm
 
+from loader import local_initial_state
+
 matplotlib.style.use('classic')
 
 from acceptance_rejection import get_random_value
@@ -75,7 +77,7 @@ def density(positions: np.ndarray, charges, n, delta_r, rho_c, dxdy):
     np.put(rhos, flat_indices, sub_rho)
     np.add.reduce(rhos, axis=0, out=rho)
     np.put(rhos, flat_indices, 0)
-    return (rho * (rho_c / (dxdy ** 2))).T * (n[0] * n[1] / positions.shape[0])
+    return (rho * (rho_c / (dxdy ** 2))).T
 
 
 def potential(rho: np.ndarray, n, delta_r):
@@ -156,31 +158,31 @@ def field_particles(field: np.ndarray, positions: np.array, moves, n, delta_r):
     return E / (dx * dy)
 
 
-def boris(velocities, charges, moves, E, B, dt):
-    u = 0.5 * charges[:, np.newaxis] * B * dt
+def boris(velocities, q_m, moves, E, B, dt):
+    u = 0.5 * q_m[:, np.newaxis] * B * dt
     s = (2.0 * u) / (1.0 + np.linalg.norm(u, axis=1) ** 2)[:, np.newaxis]
-    qEt2m = 0.5 * charges[:, np.newaxis] * E * dt
+    qEt2m = 0.5 * q_m[:, np.newaxis] * E * dt
     v_minus = velocities + qEt2m
     v_prime = v_minus + np.cross(v_minus, u)
     v_plus = v_minus + np.cross(v_prime, s)
     return (v_plus + qEt2m) * moves[:, np.newaxis]
 
 
-def update(positions, velocities, charges, moves, E, B, L, dt):
-    velocities = boris(velocities, charges, moves, E, B, dt)
+def update(positions, velocities, q_m, moves, E, B, L, dt):
+    velocities = boris(velocities, q_m, moves, E, B, dt)
     return (positions + (velocities[:, slice(0, 2)] * dt)) % L, velocities
 
 
-def simulate(positions, velocities, charges, moves, L, n, delta_r, dxdy, B, rho_c, dt, steps):
+def simulate(positions, velocities, q_m, charges, moves, L, n, delta_r, dxdy, B, rho_c, dt, steps):
     for step in tqdm(range(steps)):
         rho = density(positions, charges, n, delta_r, rho_c, dxdy)
         phi = potential(rho, n, delta_r)
         e_field_n = field_nodes(phi, n, delta_r)
         e_field_p = field_particles(e_field_n, positions, moves, n, delta_r)
         if step == 0:
-            velocities = boris(velocities, charges, moves, e_field_p, B, -0.5 * dt)
-        positions, velocities = update(positions, velocities, charges, moves, e_field_p, B, L, dt)
-        velocities = boris(velocities, charges, moves, e_field_p, B, 0.5 * dt)
+            velocities = boris(velocities, q_m, moves, e_field_p, B, -0.5 * dt)
+        positions, velocities = update(positions, velocities, q_m, moves, e_field_p, B, L, dt)
+        velocities = boris(velocities, q_m, moves, e_field_p, B, 0.5 * dt)
         yield positions, velocities, rho, phi, e_field_n, step
 
 
@@ -191,9 +193,11 @@ def setup(L, v_d, N):
     vel_left = np.random.normal(-v_d, 1, size=int(N / 4))
     vel_right = np.random.normal(v_d, 1, size=int(N / 4))
     velocities[:, 0] = np.concatenate((vel_zero, vel_left, vel_right))
-    charges = np.concatenate((np.ones(int(N / 2)), -np.ones(int(N / 2))))
+    q_m = np.concatenate((np.ones(int(N / 2)), -np.ones(int(N / 2))))
     moves = np.concatenate((np.zeros(int(N / 2)), np.ones(int(N / 2))))
-    return positions, velocities, charges, moves
+    charges = (L[0] * L[1] * q_m) / N
+    masses = charges / q_m
+    return positions, velocities, q_m, charges, masses, moves
 
 
 def main():
@@ -201,7 +205,7 @@ def main():
     L = np.array([1, 1]) * 64 * debye_length  # size of the system
     n = np.array([1, 1]) * 64
     dt = 0.1  # TODO: Change 0.05 / omega_pe
-    steps = 200
+    steps = 700
     v_d = 5.0 * v_th  # Drift velocity
     N = 100000
 
@@ -214,7 +218,7 @@ def main():
 
     B = np.array([0, 0, 0])
 
-    positions, velocities, charges, moves = setup(L, v_d, N)
+    positions, velocities, q_m, charges, masses, moves = setup(L, v_d, N)
     movers = np.where(moves == 1)
     color = np.where(velocities[movers, 0] < 0, 'b', 'r')
 
@@ -259,14 +263,17 @@ def main():
     writer = FFMpegWriter(fps=24, metadata=metadata)
     max_phi = 0
     min_phi = 0
+    # TODO: Calculate the rho matrix of static charges once
     with writer.saving(fig, 'Movie.mp4', 200):
         for positions, velocities, rho, phi, e_field_n, step in \
-                simulate(positions, velocities, charges, moves, L, n, delta_r, dxdy, B, rho_c, dt, steps):
+                simulate(positions, velocities, q_m, charges, moves, L, n, delta_r, dxdy, B, rho_c, dt, steps):
             if step % 1 != 0:
                 continue
-            vx = velocities[movers, 0].T.squeeze()
+            vx = velocities[moves == 1, 0]
+            vy = velocities[moves == 1, 1]
             fig.suptitle(r"$\omega_{\rm{pe}}$" + f"$t = {(step * dt):.2f}$")
             color_map.update({'array': phi.ravel()})
+            # TODO: Add [::100] to scatter
             scatter.set_offsets(np.c_[positions[movers, 0].T.squeeze(), velocities[movers, 0].T.squeeze()])
             ax[1, 0].cla()
             ax[1, 0].hist(velocities[movers, 0].T.squeeze(), density=True, range=(-v_d * 3, v_d * 3), bins=50,
@@ -274,7 +281,7 @@ def main():
             ax[1, 0].set_ylim([0, 0.22])
             ax[1, 0].grid()
 
-            kinetic_energies[step] = (np.linalg.norm(velocities, axis=1) ** 2).sum() / 2
+            kinetic_energies[step] = (masses[moves == 1] * (vx ** 2 + vy ** 2)).sum() / 2
             field_energies[step] = (rho * phi).sum() * 0.5
             total_energy = kinetic_energies[:step + 1] + field_energies[:step + 1]
             kinetic_energy_plot.set_data(times[:step + 1], kinetic_energies[:step+1])
