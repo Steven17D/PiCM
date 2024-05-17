@@ -46,7 +46,7 @@ def ifft(v: np.ndarray) -> np.ndarray:
 rhos = None  # Rhos are initialized once for performance
 
 
-def density(positions: np.ndarray, charges, n, delta_r, rho_c, dxdy):
+def density(positions: np.ndarray, charges, n, delta_r):
     """
     Calculate the density of particles
     :param positions:
@@ -78,7 +78,7 @@ def density(positions: np.ndarray, charges, n, delta_r, rho_c, dxdy):
     np.put(rhos, flat_indices, sub_rho)
     np.add.reduce(rhos, axis=0, out=rho)
     np.put(rhos, flat_indices, 0)
-    return (rho * (rho_c / (dxdy ** 2))).T
+    return (rho / (delta_r[0] * delta_r[0] * delta_r[1] * delta_r[1])).T
 
 
 def potential(rho: np.ndarray, n, delta_r):
@@ -139,13 +139,7 @@ def field_nodes(phi: np.ndarray, n, delta_r):
     return E
 
 
-def field_particles(field: np.ndarray, positions: np.array, moves, n, delta_r):
-    """
-    TODO: Add moves
-    :param field:
-    :param positions:
-    :return:
-    """
+def field_particles(field: np.ndarray, positions: np.array, n, delta_r):
     dx, dy = delta_r
     ijs = np.floor(positions / dy).astype(int)
     h = positions - ijs * delta_r
@@ -155,45 +149,51 @@ def field_particles(field: np.ndarray, positions: np.array, moves, n, delta_r):
     C = (h[:, 0] * (dy - h[:, 1]))[:, np.newaxis] * field[nxt_ijs[:, 0], ijs[:, 1]]
     D = (h[:, 0] * h[:, 1])[:, np.newaxis] * field[nxt_ijs[:, 0], nxt_ijs[:, 1]]
     E = A + B + C + D
-    E = E * moves[:, np.newaxis]
     return E / (dx * dy)
 
 
-def boris(velocities, q_m, moves, E, B, dt):
+def boris(velocities, q_m, E, B, dt):
     u = 0.5 * q_m[:, np.newaxis] * B * dt
     s = (2.0 * u) / (1.0 + np.linalg.norm(u, axis=1) ** 2)[:, np.newaxis]
     qEt2m = 0.5 * q_m[:, np.newaxis] * E * dt
     v_minus = velocities + qEt2m
     v_prime = v_minus + np.cross(v_minus, u)
     v_plus = v_minus + np.cross(v_prime, s)
-    return (v_plus + qEt2m) * moves[:, np.newaxis]
+    return v_plus + qEt2m
 
 
-def update(positions, velocities, q_m, moves, E, B, L, dt):
-    velocities = boris(velocities, q_m, moves, E, B, dt)
+def update(positions, velocities, q_m, E, B, L, dt):
+    velocities = boris(velocities, q_m, E, B, dt)
     return (positions + (velocities[:, slice(0, 2)] * dt)) % L, velocities
 
 
-def simulate(positions, velocities, q_m, charges, moves, L, n, delta_r, dxdy, B, rho_c, dt, steps):
+def simulate(positions, velocities, q_m, charges, moves, L, n, delta_r, B, dt, steps):
+    statics = moves == 0
+    static_rho = density(positions[statics], charges[statics], n, delta_r)
+    moving = moves == 1
+    moving_positions = positions[moving]
+    moving_charges = charges[moving]
+    moving_velocities = velocities[moving]
+    moving_q_m = q_m[moving]
     for step in tqdm(range(steps)):
-        rho = density(positions, charges, n, delta_r, rho_c, dxdy)
+        rho = static_rho + density(moving_positions, moving_charges, n, delta_r)
         phi = potential(rho, n, delta_r)
         e_field_n = field_nodes(phi, n, delta_r)
-        e_field_p = field_particles(e_field_n, positions, moves, n, delta_r)
+        e_field_p = field_particles(e_field_n, moving_positions, n, delta_r)
         if step == 0:
-            velocities = boris(velocities, q_m, moves, e_field_p, B, -0.5 * dt)
-        positions, velocities = update(positions, velocities, q_m, moves, e_field_p, B, L, dt)
-        new_velocities = boris(velocities, q_m, moves, e_field_p, B, 0.5 * dt)
-        yield positions, new_velocities, rho, phi, e_field_n, step
+            moving_velocities = boris(moving_velocities, moving_q_m, e_field_p, B, -0.5 * dt)
+        moving_positions, moving_velocities = update(moving_positions, moving_velocities, moving_q_m, e_field_p, B,
+                                                     L, dt)
+        new_velocities = boris(moving_velocities, moving_q_m, e_field_p, B, 0.5 * dt)
+        yield moving_positions, new_velocities, rho, phi, e_field_n, step
 
 
 def setup(L, v_d, N):
     positions = np.array([np.random.uniform(0, l, [N]) for l in L]).T
     velocities = np.zeros([N, 3])
     vel_zero = np.zeros(int(N / 2))
-    vel_left = np.random.normal(-v_d, 1, size=int(N / 4))
-    vel_right = np.random.normal(v_d, 1, size=int(N / 4))
-    velocities[:, 0] = np.concatenate((vel_zero, vel_left, vel_right))
+    vel = [get_random_value(maxwell_distribution, -v_d * 3, v_d * 3, v_d) for _ in range(N // 2)]
+    velocities[:, 0] = np.concatenate((vel_zero, vel))
     q_m = np.concatenate((np.ones(int(N / 2)), -np.ones(int(N / 2))))
     moves = np.concatenate((np.zeros(int(N / 2)), np.ones(int(N / 2))))
     charges = (L[0] * L[1] * q_m) / N
@@ -209,15 +209,12 @@ def main():
     # Table II.
     L = np.array([1, 1]) * 64 * debye_length  # size of the system
     n = np.array([1, 1]) * 64
-    dt = 0.1  # TODO: Change 0.05 / omega_pe
-    steps = 500
+    dt = 0.1
+    steps = 4000
     v_d = 5.0 * v_th  # Drift velocity
     N = 100000
 
     delta_r = L / n  # Vector of delta x and delta y
-    dxdy = np.multiply.reduce(delta_r)
-    q = 1  # Charge of a cell? TODO: Check
-    rho_c = q / dxdy
     assert 0.5 * delta_r[0] < debye_length
     assert 0.5 * delta_r[1] < debye_length
 
@@ -245,14 +242,11 @@ def main():
     ax_phi.set_ylim(0, (L - delta_r)[1])
     ax_phi.set_xlabel(r"$x / \lambda_D$")
     ax_phi.set_ylabel(r"$y / \lambda_D$")
-    rho = density(positions, charges, n, delta_r, rho_c, dxdy)
+    rho = density(positions, charges, n, delta_r)
     phi = potential(rho, n, delta_r)
     color_map = ax_phi.pcolormesh(phi, shading="gouraud", cmap="jet", vmin=-16, vmax=21)
     bar = plt.colorbar(color_map, ax=ax_phi)
     bar.set_label(r"$\phi / (T_e / e)$")
-
-    ax_vx_h.set_xlabel(r"$v_x / v_{\rm{th}}$")
-    ax_vx_h.grid()
 
     times = np.arange(0, steps * dt, dt)
     kinetic_energies = np.empty(steps)
@@ -269,40 +263,41 @@ def main():
 
     Nd = 10
     scatter = ax_vx.scatter(positions[movers, 0][::Nd], velocities[movers, 0][::Nd],
-                               c=color[::Nd], s=5, linewidth=0)
+                            c=color[::Nd], s=5, linewidth=0)
 
-    metadata = dict(title='Movie', artist='codinglikemad')
+    metadata = dict(title=f'PiCM: N={N}, Steps={steps}')
     writer = FFMpegWriter(fps=24, metadata=metadata)
     max_phi = 0
     min_phi = 0
-    # TODO: Calculate the rho matrix of static charges once
     with writer.saving(fig, f'{time.strftime("%Y%m%d-%H%M%S")}.mp4', 200):
         for positions, velocities, rho, phi, e_field_n, step in \
-                simulate(positions, velocities, q_m, charges, moves, L, n, delta_r, dxdy, B, rho_c, dt, steps):
+                simulate(positions, velocities, q_m, charges, moves, L, n, delta_r, B, dt, steps):
             if step % 1 != 0:
                 continue
-            v = velocities[movers, :]
             fig.suptitle(r"$\omega_{\rm{pe}}$" + f"$t = {(step * dt):.2f}$")
-            color_map.update({'array': phi.ravel()})
-            scatter.set_offsets(np.c_[positions[movers, 0][::Nd], v[:, 0][::Nd]])
+            color_map.update({'array': phi.T.ravel()})
+            min_phi, max_phi = min(min_phi, np.min(phi)), max(max_phi, np.max(phi))
+            color_map.set_clim(min_phi, max_phi)
+
+            scatter.set_offsets(np.c_[positions[:, 0][::Nd], velocities[:, 0][::Nd]])
+
             ax_vx_h.cla()
-            ax_vx_h.hist(velocities[movers, 0], density=True, range=(-v_d * 3, v_d * 3), bins=50,
-                          color="red")
+            ax_vx_h.hist(velocities[:, 0], density=True, range=(-v_d * 3, v_d * 3), bins=50,
+                         color="red")
             ax_vx_h.set_ylim([0, 0.22])
+            ax_vx_h.set_xlabel(r"$v_x / v_{\rm{th}}$")
             ax_vx_h.grid()
 
-            kinetic_energies[step] = calculate_kinetic_energy(v, moving_masses)
+            kinetic_energies[step] = calculate_kinetic_energy(velocities, moving_masses)
             field_energies[step] = (rho * phi).sum() * 0.5
             total_energy = kinetic_energies[:step + 1] + field_energies[:step + 1]
-            kinetic_energy_plot.set_data(times[:step + 1], kinetic_energies[:step+1])
-            field_energy_plot.set_data(times[:step + 1], field_energies[:step+1])
+            kinetic_energy_plot.set_data(times[:step + 1], kinetic_energies[:step + 1])
+            field_energy_plot.set_data(times[:step + 1], field_energies[:step + 1])
             total_total_plot.set_data(times[:step + 1], total_energy)
             ax_energy.set_ylim([0, total_energy.max() * 1.1])
 
             fig.canvas.draw_idle()
             writer.grab_frame()
-            min_phi = min(min_phi, np.min(phi))
-            max_phi = max(max_phi, np.max(phi))
     print('min_phi', min_phi)
     print('max_phi', max_phi)
     plt.show()
