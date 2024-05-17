@@ -1,6 +1,7 @@
 """
 We refer to the superparticle as particle
 """
+import time
 from itertools import product
 
 import matplotlib
@@ -182,8 +183,8 @@ def simulate(positions, velocities, q_m, charges, moves, L, n, delta_r, dxdy, B,
         if step == 0:
             velocities = boris(velocities, q_m, moves, e_field_p, B, -0.5 * dt)
         positions, velocities = update(positions, velocities, q_m, moves, e_field_p, B, L, dt)
-        velocities = boris(velocities, q_m, moves, e_field_p, B, 0.5 * dt)
-        yield positions, velocities, rho, phi, e_field_n, step
+        new_velocities = boris(velocities, q_m, moves, e_field_p, B, 0.5 * dt)
+        yield positions, new_velocities, rho, phi, e_field_n, step
 
 
 def setup(L, v_d, N):
@@ -200,12 +201,16 @@ def setup(L, v_d, N):
     return positions, velocities, q_m, charges, masses, moves
 
 
+def calculate_kinetic_energy(velocities, masses):
+    return (masses * (velocities[:, 0] ** 2 + velocities[:, 1] ** 2)).sum() / 2
+
+
 def main():
     # Table II.
     L = np.array([1, 1]) * 64 * debye_length  # size of the system
     n = np.array([1, 1]) * 64
     dt = 0.1  # TODO: Change 0.05 / omega_pe
-    steps = 700
+    steps = 500
     v_d = 5.0 * v_th  # Drift velocity
     N = 100000
 
@@ -219,75 +224,80 @@ def main():
     B = np.array([0, 0, 0])
 
     positions, velocities, q_m, charges, masses, moves = setup(L, v_d, N)
-    movers = np.where(moves == 1)
+    movers = moves == 1
+    moving_masses = masses[movers]
     color = np.where(velocities[movers, 0] < 0, 'b', 'r')
 
     fig, ax = plt.subplots(2, 2)
+    ax_vx = ax[0, 0]
+    ax_phi = ax[0, 1]
+    ax_vx_h = ax[1, 0]
+    ax_energy = ax[1, 1]
 
-    ax[0, 0].set_xlim([0, L[0]])
-    ax[0, 0].set_ylim([-v_d * 2, v_d * 2])
-    ax[0, 0].set_xlabel(r"$x / \lambda_D$")
-    ax[0, 0].set_ylabel(r"$v_x / v_{th}$")
+    ax_vx.set_xlim([0, L[0]])
+    ax_vx.set_ylim([-v_d * 3, v_d * 3])
+    ax_vx.set_xlabel(r"$x / \lambda_D$")
+    ax_vx.set_ylabel(r"$v_x / v_{th}$")
+    ax_vx.grid()
 
-    ax[0, 1].set_title(r"$\omega_{\rm{pe}}$")
-    ax[0, 1].set_xlim(0, (L - delta_r)[0])
-    ax[0, 1].set_ylim(0, (L - delta_r)[1])
-    ax[0, 1].set_xlabel(r"$x / \lambda_D$")
-    ax[0, 1].set_ylabel(r"$y / \lambda_D$")
+    ax_phi.set_title(r"$\omega_{\rm{pe}}$")
+    ax_phi.set_xlim(0, (L - delta_r)[0])
+    ax_phi.set_ylim(0, (L - delta_r)[1])
+    ax_phi.set_xlabel(r"$x / \lambda_D$")
+    ax_phi.set_ylabel(r"$y / \lambda_D$")
     rho = density(positions, charges, n, delta_r, rho_c, dxdy)
     phi = potential(rho, n, delta_r)
-    color_map = ax[0, 1].pcolormesh(phi, shading="gouraud", cmap="jet", vmin=-16, vmax=21)
-    bar = plt.colorbar(color_map, ax=ax[0, 1])
+    color_map = ax_phi.pcolormesh(phi, shading="gouraud", cmap="jet", vmin=-16, vmax=21)
+    bar = plt.colorbar(color_map, ax=ax_phi)
     bar.set_label(r"$\phi / (T_e / e)$")
 
-    ax[1, 0].set_xlabel(r"$v_x / v_{\rm{th}}$")
-    ax[1, 0].grid()
+    ax_vx_h.set_xlabel(r"$v_x / v_{\rm{th}}$")
+    ax_vx_h.grid()
 
     times = np.arange(0, steps * dt, dt)
     kinetic_energies = np.empty(steps)
     field_energies = np.empty(steps)
-    kinetic_energy_plot, = ax[1, 1].plot([], [], label="Kinetic")
-    field_energy_plot, = ax[1, 1].plot([], [], label="Field")
-    total_total_plot, = ax[1, 1].plot([], [], label="Total")
-    ax[1, 1].set_xlim([0, steps * dt])
-    ax[1, 1].set_xlabel(r"$\omega_{\rm{pe}}t$")
-    ax[1, 1].set_ylabel(r"$E / (n_0 T_e / \varepsilon_0)$")
-    ax[1, 1].grid()
-    ax[1, 1].legend(loc="best")
+    kinetic_energy_plot, = ax_energy.plot([], [], label="Kinetic")
+    field_energy_plot, = ax_energy.plot([], [], label="Field")
+    total_total_plot, = ax_energy.plot([], [], label="Total")
+    ax_energy.set_xlim([0, steps * dt])
+    ax_energy.set_xlabel(r"$\omega_{\rm{pe}}t$")
+    ax_energy.set_ylabel(r"$E / (n_0 T_e / \varepsilon_0)$")
+    ax_energy.grid()
+    ax_energy.legend(loc="best")
     fig.tight_layout()
 
-    scatter = ax[0, 0].scatter(positions[movers, 0].T.squeeze(), velocities[movers, 0].T.squeeze(),
-                               c=color.T.squeeze(), s=5, linewidth=0)
+    Nd = 10
+    scatter = ax_vx.scatter(positions[movers, 0][::Nd], velocities[movers, 0][::Nd],
+                               c=color[::Nd], s=5, linewidth=0)
 
     metadata = dict(title='Movie', artist='codinglikemad')
     writer = FFMpegWriter(fps=24, metadata=metadata)
     max_phi = 0
     min_phi = 0
     # TODO: Calculate the rho matrix of static charges once
-    with writer.saving(fig, 'Movie.mp4', 200):
+    with writer.saving(fig, f'{time.strftime("%Y%m%d-%H%M%S")}.mp4', 200):
         for positions, velocities, rho, phi, e_field_n, step in \
                 simulate(positions, velocities, q_m, charges, moves, L, n, delta_r, dxdy, B, rho_c, dt, steps):
             if step % 1 != 0:
                 continue
-            vx = velocities[moves == 1, 0]
-            vy = velocities[moves == 1, 1]
+            v = velocities[movers, :]
             fig.suptitle(r"$\omega_{\rm{pe}}$" + f"$t = {(step * dt):.2f}$")
             color_map.update({'array': phi.ravel()})
-            # TODO: Add [::100] to scatter
-            scatter.set_offsets(np.c_[positions[movers, 0].T.squeeze(), velocities[movers, 0].T.squeeze()])
-            ax[1, 0].cla()
-            ax[1, 0].hist(velocities[movers, 0].T.squeeze(), density=True, range=(-v_d * 3, v_d * 3), bins=50,
+            scatter.set_offsets(np.c_[positions[movers, 0][::Nd], v[:, 0][::Nd]])
+            ax_vx_h.cla()
+            ax_vx_h.hist(velocities[movers, 0], density=True, range=(-v_d * 3, v_d * 3), bins=50,
                           color="red")
-            ax[1, 0].set_ylim([0, 0.22])
-            ax[1, 0].grid()
+            ax_vx_h.set_ylim([0, 0.22])
+            ax_vx_h.grid()
 
-            kinetic_energies[step] = (masses[moves == 1] * (vx ** 2 + vy ** 2)).sum() / 2
+            kinetic_energies[step] = calculate_kinetic_energy(v, moving_masses)
             field_energies[step] = (rho * phi).sum() * 0.5
             total_energy = kinetic_energies[:step + 1] + field_energies[:step + 1]
             kinetic_energy_plot.set_data(times[:step + 1], kinetic_energies[:step+1])
             field_energy_plot.set_data(times[:step + 1], field_energies[:step+1])
             total_total_plot.set_data(times[:step + 1], total_energy)
-            ax[1, 1].set_ylim([0, total_energy.max() * 1.1])
+            ax_energy.set_ylim([0, total_energy.max() * 1.1])
 
             fig.canvas.draw_idle()
             writer.grab_frame()
