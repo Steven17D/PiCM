@@ -1,3 +1,6 @@
+import itertools
+from concurrent.futures import ThreadPoolExecutor
+
 import numpy as np
 from tqdm import tqdm
 
@@ -16,13 +19,13 @@ def ifft(v: np.ndarray) -> np.ndarray:
 rhos = None  # Rhos are initialized once for performance
 
 
-def density(positions: np.ndarray, charges, n, delta_r):
+def _density(positions: np.ndarray, charges, i, n, delta_r):
     """
     Calculate the density of particles
     :param positions:
     :return:
     """
-    global rhos
+    global grhos
     rho = np.zeros(n)
     ijs = np.floor(positions / delta_r).astype(int)  # TODO: Check round of floor
     ijs_up = (ijs + [0, 1]) % n
@@ -30,8 +33,8 @@ def density(positions: np.ndarray, charges, n, delta_r):
     ijs_diag = (ijs + [1, 1]) % n
     h = positions - ijs * delta_r
     h_n = delta_r - h
-    if rhos is None or rhos.shape[1:] != rho.shape:
-        rhos = np.full((positions.shape[0], *rho.shape), rho)
+    # if rhos is None or rhos.shape[1:] != rho.shape:
+    rhos = grhos[i]  # np.full((positions.shape[0], *rho.shape), rho)
 
     origin_values = h_n[:, 0] * h_n[:, 1] * charges
     up_values = h_n[:, 0] * h[:, 1] * charges
@@ -50,6 +53,24 @@ def density(positions: np.ndarray, charges, n, delta_r):
     np.put(rhos, flat_indices, 0)
     return (rho / (delta_r[0] * delta_r[0] * delta_r[1] * delta_r[1])).T
 
+grhos = None
+
+def density(positions: np.ndarray, charges, n, delta_r):
+    import os
+    thread_count = os.cpu_count()
+    chunk_size = 10000
+    split = positions.shape[0] // chunk_size
+    global grhos
+    if grhos is None:
+        grhos = np.zeros((thread_count, chunk_size, *n))
+    with ThreadPoolExecutor(max_workers=thread_count) as e:
+        results = e.map(lambda p: _density(p[0], p[1], p[2], n, delta_r),
+                        zip(np.split(positions, split),
+                            np.split(charges, split),
+                            [index % thread_count for index in range(split)])
+                        )
+        return np.sum(results, axis=0)
+
 
 def potential(rho: np.ndarray, n, delta_r):
     """
@@ -58,7 +79,7 @@ def potential(rho: np.ndarray, n, delta_r):
     :param rho:
     :return:
     """
-    rho = rho.astype(complex)
+    rho = rho.astype(np.complex64)
 
     # FFT rho to rho_k
     for xi in range(n[0]):
@@ -73,7 +94,7 @@ def potential(rho: np.ndarray, n, delta_r):
     Wn, Wm = 1, 1
     dx_2, dy_2 = delta_r ** 2
 
-    phi_k = np.empty_like(rho_k, dtype=complex)
+    phi_k = np.empty_like(rho_k, dtype=np.complex64)
     for ni in range(n[0]):
         for m in range(n[1]):
             denom = dy_2 * (2.0 - Wn - 1.0 / Wn) + dx_2 * (2.0 - Wm - 1.0 / Wm)
@@ -88,7 +109,7 @@ def potential(rho: np.ndarray, n, delta_r):
     for yi in range(n[1]):
         phi_k[:, yi] = ifft(phi_k[:, yi])
 
-    return np.real(phi_k) + 0.0014421573082545325
+    return np.real(phi_k)  # + 0.0014421573082545325
 
 
 def field_nodes(phi: np.ndarray, n, delta_r):

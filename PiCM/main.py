@@ -1,13 +1,12 @@
-"""
-We refer to the superparticle as particle
-"""
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import matplotlib
 import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib.animation import FFMpegWriter
 
+from PiCM.loader import local_initial_state
 from PiCM.simulation import simulate, density, potential
 from PiCM.acceptance_rejection import get_random_value
 
@@ -25,15 +24,29 @@ def maxwell_distribution(v, v_d, v_th):
     )
     )
 
+def run(function, count):
+    with ThreadPoolExecutor(max_workers=28) as executor:
+        futures = [executor.submit(function) for _ in range(count)]
+    return np.fromiter((f.result() for f in futures), dtype=np.float64)
+
 
 def setup(L, v_d, v_th, N):
     positions = np.array([np.random.uniform(0, l, [N]) for l in L]).T
     velocities = np.zeros([N, 3])
     vel_zero = np.zeros(int(N / 2))
-    vel = [get_random_value(lambda v: maxwell_distribution(v, v_d, v_th), -v_d * 3, v_d * 3, v_d) for _ in range(N // 2)]
+    # vel = [get_random_value(lambda v: maxwell_distribution(v, v_d, v_th), -v_d * 3, v_d * 3, v_d) for _ in range(N // 2)]
+    vel = run(lambda: get_random_value(lambda v: maxwell_distribution(v, v_d, v_th), -v_d * 3, v_d * 3, v_d), N // 2)
     velocities[:, 0] = np.concatenate((vel_zero, vel))
     q_m = np.concatenate((np.ones(int(N / 2)), -np.ones(int(N / 2))))
     moves = np.concatenate((np.zeros(int(N / 2)), np.ones(int(N / 2))))
+    charges = (L[0] * L[1] * q_m) / N
+    masses = charges / q_m
+    return positions, velocities, q_m, charges, masses, moves
+
+
+def setup_from_file(L):
+    positions, velocities, q_m, moves = local_initial_state(r"tests/electrosctatic/two_stream.dat")
+    # N = 99856
     charges = (L[0] * L[1] * q_m) / N
     masses = charges / q_m
     return positions, velocities, q_m, charges, masses, moves
@@ -50,7 +63,7 @@ def main():
     L = np.array([1, 1]) * 64 * debye_length  # size of the system
     n = np.array([1, 1]) * 64
     dt = 0.1
-    steps = 500
+    steps = 150
     v_d = 5.0 * v_th  # Drift velocity
     N = 100000
 
@@ -61,6 +74,7 @@ def main():
     B = np.array([0, 0, 0])
 
     positions, velocities, q_m, charges, masses, moves = setup(L, v_d, v_th, N)
+    # positions, velocities, q_m, charges, masses, moves = setup_from_file(L)
     movers = moves == 1
     moving_masses = masses[movers]
     color = np.where(velocities[movers, 0] < 0, 'b', 'r')
@@ -78,13 +92,13 @@ def main():
     ax_vx.grid()
 
     ax_phi.set_title(r"$\omega_{\rm{pe}}$")
-    ax_phi.set_xlim(0, (L - delta_r)[0])
-    ax_phi.set_ylim(0, (L - delta_r)[1])
+    # ax_phi.set_xlim(0, (L - delta_r)[0])
+    # ax_phi.set_ylim(0, (L - delta_r)[1])
     ax_phi.set_xlabel(r"$x / \lambda_D$")
     ax_phi.set_ylabel(r"$y / \lambda_D$")
     rho = density(positions, charges, n, delta_r)
     phi = potential(rho, n, delta_r)
-    color_map = ax_phi.pcolormesh(phi, shading="gouraud", cmap="jet", vmin=-16, vmax=21)
+    color_map = ax_phi.pcolormesh(phi, shading="gouraud", cmap="jet")
     bar = plt.colorbar(color_map, ax=ax_phi)
     bar.set_label(r"$\phi / (T_e / e)$")
 

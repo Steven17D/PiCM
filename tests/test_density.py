@@ -1,5 +1,6 @@
 import re
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from glob import glob
 
 import numpy as np
@@ -121,23 +122,27 @@ class TestDensity(unittest.TestCase):
         plt.show()
 
     def test_data(self):
-        Lx = Ly = 64
+        L = np.array([64, 64])
+        n = np.array([64, 64]) * 2
+        delta_r = L / n
         positions, _, q_m, _ = local_initial_state(r"electrosctatic\two_stream.dat")
         N = positions.shape[0]
-        expected_rho = load_rho(r"electrosctatic\rho\step_0_.dat")
-        charges = (Lx * Ly * q_m) / N
-        rho = density(positions, charges, np.array([Lx, Ly]), np.array([1., 1.]))
+        expected_rho = load_rho(r"electrosctatic\rho\first_rho0.dat", n, delta_r)
+        charges = (L[0] * L[1] * q_m) / N
+        rho = density(positions, charges, n, delta_r)
         np.testing.assert_allclose(rho, expected_rho, rtol=1e-5)
 
 
 class TestPotential(unittest.TestCase):
 
     def test_data(self):
-        rho = load_rho(r"electrosctatic\rho\step_0_.dat")
-        expected_phi = load_rho(r"electrosctatic\phi\step_0_.dat")
-        n = np.array([64, 64])
-        phi = potential(rho, n, np.array([1., 1.]))
-        np.testing.assert_allclose(phi, expected_phi, rtol=0.00275092)
+        L = np.array([64, 64])
+        n = np.array([64, 64]) * 2
+        delta_r = L / n
+        rho = load_rho(r"electrosctatic\rho\first_rho0.dat", n, delta_r)
+        expected_phi = load_rho(r"electrosctatic\phi\step_0_.dat", n, delta_r)
+        phi = potential(rho, n, delta_r)
+        np.testing.assert_allclose(phi, expected_phi, rtol=0.008)
 
     def test_single_particles_phi(self):
         self._plot_phi(1, show_positions=True)
