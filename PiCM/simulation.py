@@ -58,7 +58,7 @@ def potential(rho: np.ndarray, n, delta_r):
     :param rho:
     :return:
     """
-    rho = rho.astype(complex)
+    rho = rho.astype(np.complex64)
 
     # FFT rho to rho_k
     for xi in range(n[0]):
@@ -73,7 +73,7 @@ def potential(rho: np.ndarray, n, delta_r):
     Wn, Wm = 1, 1
     dx_2, dy_2 = delta_r ** 2
 
-    phi_k = np.empty_like(rho_k, dtype=complex)
+    phi_k = np.empty_like(rho_k, dtype=np.complex64)
     for ni in range(n[0]):
         for m in range(n[1]):
             denom = dy_2 * (2.0 - Wn - 1.0 / Wn) + dx_2 * (2.0 - Wm - 1.0 / Wm)
@@ -88,7 +88,7 @@ def potential(rho: np.ndarray, n, delta_r):
     for yi in range(n[1]):
         phi_k[:, yi] = ifft(phi_k[:, yi])
 
-    return np.real(phi_k) + 0.0014421573082545325
+    return np.real(phi_k)
 
 
 def field_nodes(phi: np.ndarray, n, delta_r):

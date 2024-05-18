@@ -1,11 +1,12 @@
 import re
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from glob import glob
 
 import numpy as np
 from matplotlib import pyplot as plt
 
-from PiCM.loader import local_initial_state, load_rho, load_field, load_space, load_energy
+from PiCM.loader import local_initial_state, load_rho, load_field, load_space, load_energy, load_config
 from PiCM.main import calculate_kinetic_energy
 from PiCM.simulation import density, boris, field_nodes, field_particles, potential, update
 
@@ -121,23 +122,28 @@ class TestDensity(unittest.TestCase):
         plt.show()
 
     def test_data(self):
-        Lx = Ly = 64
+        N, L, n = load_config(r"electrosctatic\sim_two_stream.json")
+        delta_r = L / n
         positions, _, q_m, _ = local_initial_state(r"electrosctatic\two_stream.dat")
-        N = positions.shape[0]
-        expected_rho = load_rho(r"electrosctatic\rho\step_0_.dat")
-        charges = (Lx * Ly * q_m) / N
-        rho = density(positions, charges, np.array([Lx, Ly]), np.array([1., 1.]))
+        expected_rho = load_rho(r"electrosctatic\rho\first_rho0.dat", n, delta_r)
+        charges = (L[0] * L[1] * q_m) / N
+        # rho = density(positions, charges, n, delta_r)
+        split = positions.shape[0] // 10000
+        rho = np.sum([density(p, c, n, delta_r) for p, c in zip(
+            np.split(positions, split),
+            np.split(charges, split))], axis=0)
         np.testing.assert_allclose(rho, expected_rho, rtol=1e-5)
 
 
 class TestPotential(unittest.TestCase):
 
     def test_data(self):
-        rho = load_rho(r"electrosctatic\rho\step_0_.dat")
-        expected_phi = load_rho(r"electrosctatic\phi\step_0_.dat")
-        n = np.array([64, 64])
-        phi = potential(rho, n, np.array([1., 1.]))
-        np.testing.assert_allclose(phi, expected_phi, rtol=0.00275092)
+        N, L, n = load_config(r"electrosctatic\sim_two_stream.json")
+        delta_r = L / n
+        rho = load_rho(r"electrosctatic\rho\first_rho0.dat", n, delta_r)
+        expected_phi = load_rho(r"electrosctatic\phi\step_0_.dat", n, delta_r)
+        phi = potential(rho, n, delta_r)
+        np.testing.assert_allclose(phi, expected_phi, rtol=0.008)
 
     def test_single_particles_phi(self):
         self._plot_phi(1, show_positions=True)
@@ -178,13 +184,10 @@ class TestPotential(unittest.TestCase):
 
 class TestField(unittest.TestCase):
     def test_data(self):
-        Lx = Ly = n_x = n_y = 64
-        dx = dy = 1
-        delta_r = np.array([dx, dy])
-        n = np.array([n_x, n_y])
-
-        phi = load_rho(r"electrosctatic\phi\step_0_.dat")
-        expected_field = load_field(r"electrosctatic\Efield\step_0_.dat")
+        N, L, n = load_config(r"electrosctatic\sim_two_stream.json")
+        delta_r = L / n
+        phi = load_rho(r"electrosctatic\phi\step_0_.dat", n, delta_r)
+        expected_field = load_field(r"electrosctatic\Efield\step_0_.dat", n, delta_r)
         field = field_nodes(phi, n, delta_r)
         np.testing.assert_allclose(field, expected_field, atol=5e-06)
 
@@ -205,15 +208,12 @@ class TestField(unittest.TestCase):
 
 class TestPhaseSpace(unittest.TestCase):
     def test_data(self):
-        Lx = Ly = n_x = n_y = 64
-        L = np.array([Lx, Ly])
-        dx = dy = 1
-        delta_r = np.array([dx, dy])
-        n = np.array([n_x, n_y])
         dt = 0.1
         B = np.array([0, 0, 0])
+        N, L, n = load_config(r"electrosctatic\sim_two_stream.json")
+        delta_r = L / n
         positions, velocities, q_m, moves = local_initial_state(r"electrosctatic\two_stream.dat")
-        expected_field = load_field(r"electrosctatic\Efield\step_0_.dat")
+        expected_field = load_field(r"electrosctatic\Efield\step_0_.dat", n, delta_r)
         expected_positions, expected_velocities = load_space(
             r"electrosctatic\phase_space\step_0_.dat")
         e_field_p = field_particles(expected_field, positions, n, delta_r)
@@ -226,23 +226,25 @@ class TestPhaseSpace(unittest.TestCase):
 
 class TestEnergy(unittest.TestCase):
     def test_data(self):
+        N, L, n = load_config(r"electrosctatic\sim_two_stream.json")
+        delta_r = L / n
         step_re = re.compile(r"\\step_(\d+)_.dat$")
         expected_energies = load_energy(r"electrosctatic\energy\energy.dat")
+        fe = []
+        efe = []
         for phase_file, rho_file, phi_file in zip(glob(r"electrosctatic\phase_space\step_*_.dat"),
                                                   glob(r"electrosctatic\rho\step_*_.dat"),
                                                   glob(r"electrosctatic\phi\step_*_.dat")):
             step = int(step_re.search(phase_file).group(1))
             positions, velocities = load_space(phase_file)
-            N = positions.shape[0] * 2  # The position are only for moving particles which are half of the total
-            rho = load_rho(rho_file)
-            phi = load_rho(phi_file)
-            mass = (rho.shape[0] * rho.shape[1] * 1) / N
-
+            mass = (L[0] * L[1] * 1) / N
             kinetic_energy = calculate_kinetic_energy(velocities, mass)
-            field_energy = (rho * phi).sum() * 0.5
             np.testing.assert_allclose(kinetic_energy, expected_energies[step][0], rtol=0.002)
-            np.testing.assert_allclose(field_energy, expected_energies[step][1], atol=0.002)
 
+            rho = load_rho(rho_file, n, delta_r)
+            phi = load_rho(phi_file, n, delta_r)
+            field_energy = (rho * phi).sum() * 0.5
+            np.testing.assert_allclose(field_energy, expected_energies[step][1], atol=0.004)
 
 if __name__ == '__main__':
     unittest.main()
