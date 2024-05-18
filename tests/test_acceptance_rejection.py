@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 from matplotlib import pyplot as plt
-from acceptance_rejection import get_random_value
+from PiCM.acceptance_rejection import get_random_value
 
 n_e = 0.5
 v_th = 1

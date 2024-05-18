@@ -5,8 +5,8 @@ from glob import glob
 import numpy as np
 from matplotlib import pyplot as plt
 
-from loader import local_initial_state
-from main import density, boris, field_nodes, field_particles, potential, update
+from PiCM.loader import local_initial_state
+from PiCM.main import density, boris, field_nodes, field_particles, potential, update, calculate_kinetic_energy
 
 
 def read_lines(file_name):
@@ -268,7 +268,8 @@ class TestEnergy(unittest.TestCase):
             rho = load_rho(rho_file)
             phi = load_rho(phi_file)
             mass = (rho.shape[0] * rho.shape[1] * 1) / N
-            kinetic_energy = ((velocities[:, 0] ** 2 + velocities[:, 1] ** 2).sum() / 2) * mass
+
+            kinetic_energy = calculate_kinetic_energy(velocities, mass)
             field_energy = (rho * phi).sum() * 0.5
             np.testing.assert_allclose(kinetic_energy, expected_energies[step][0], rtol=0.002)
             np.testing.assert_allclose(field_energy, expected_energies[step][1], atol=0.002)
