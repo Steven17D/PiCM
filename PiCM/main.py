@@ -108,7 +108,7 @@ def main():
     metadata = dict(title=f'PiCM: N={N}, Steps={steps}')
     writer = FFMpegWriter(fps=24, metadata=metadata)
     max_phi = min_phi = 0
-    with writer.saving(fig, f'output\\{time.strftime("%Y%m%d-%H%M%S")}.mp4', 200):
+    with writer.saving(fig, f'output/{time.strftime("%Y%m%d-%H%M%S")}.mp4', 200):
         for positions, velocities, rho, phi, e_field_n, step in \
                 simulate(positions, velocities, q_m, charges, moves, L, n, delta_r, B, dt, steps):
             if step % 1 != 0:

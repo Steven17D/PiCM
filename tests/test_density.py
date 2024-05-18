@@ -5,56 +5,17 @@ from glob import glob
 import numpy as np
 from matplotlib import pyplot as plt
 
-from PiCM.loader import local_initial_state
-from PiCM.main import density, boris, field_nodes, field_particles, potential, update, calculate_kinetic_energy
-
-
-def read_lines(file_name):
-    with open(file_name) as f:
-        return f.readlines()
-
-
-def load_rho(file_name):
-    expected_rho = np.empty(shape=(64, 64), dtype=float)
-    for line in read_lines(file_name):
-        i, j, value = [float(d) for d in line.split(" ")]
-        expected_rho[int(i), int(j)] = value
-    return expected_rho
-
-
-def load_field(file_name):
-    data = np.empty(shape=(64, 64, 3), dtype=float)
-    for line in read_lines(file_name):
-        i, j, *value = [float(d) for d in line.split(" ")]
-        data[int(i), int(j)] = np.array([*value, 0])
-    return data
-
-
-def load_space(file_name):
-    lines = read_lines(file_name)
-    N = len(lines)
-    positions = np.empty(shape=(N, 2), dtype=float)
-    velocities = np.empty(shape=(N, 3), dtype=float)
-    for p, line in enumerate(lines, start=0):
-        x, y, vx, vy, vz = [float(d) for d in line.split(" ")]
-        positions[p] = np.array([x, y])
-        velocities[p] = np.array([vx, vy, vz])
-    return positions, velocities
-
-
-def load_energy(file_name):
-    r = {}
-    for line in read_lines(file_name):
-        step, KE, FE = [float(d) for d in line.split(" ")]
-        r[int(step)] = [KE, FE]
-    return r
+from PiCM.loader import local_initial_state, load_rho, load_field, load_space, load_energy
+from PiCM.main import calculate_kinetic_energy
+from PiCM.simulation import density, boris, field_nodes, field_particles, potential, update
 
 
 class TestDensity(unittest.TestCase):
     def test_single_particle(self):
         n = np.array([3, 3])
         positions = np.array([[0.5, 0.5]])
-        rho = density(positions, n, np.array([1., 1.]), 1.0, 1.0)
+        charges = np.array([1])
+        rho = density(positions, charges, n, np.array([1., 1.]))
         expected = np.array([
             [0.25, 0.25, 0],
             [0.25, 0.25, 0],
@@ -65,7 +26,8 @@ class TestDensity(unittest.TestCase):
     def test_single_particle_origin(self):
         n = np.array([3, 3])
         positions = np.array([[0, 0]])
-        rho = density(positions, n, np.array([1., 1.]), 1.0, 1.0)
+        charges = np.array([1])
+        rho = density(positions, charges, n, np.array([1., 1.]))
         expected = np.array([
             [1, 0, 0],
             [0, 0, 0],
@@ -76,7 +38,8 @@ class TestDensity(unittest.TestCase):
     def test_two_particles_origin(self):
         n = np.array([3, 3])
         positions = np.array([[0, 0], [0, 0]])
-        rho = density(positions, n, np.array([1., 1.]), 1.0, 1.0)
+        charges = np.ones(2)
+        rho = density(positions, charges, n, np.array([1., 1.]))
         expected = np.array([
             [2, 0, 0],
             [0, 0, 0],
@@ -87,7 +50,8 @@ class TestDensity(unittest.TestCase):
     def test_two_particles_same_cell(self):
         n = np.array([3, 3])
         positions = np.array([[0.5, 0.5], [0.5, 0.5]])
-        rho = density(positions, n, np.array([1., 1.]), 1.0, 1.0)
+        charges = np.ones(2)
+        rho = density(positions, charges, n, np.array([1., 1.]))
         expected = np.array([
             [0.5, 0.5, 0],
             [0.5, 0.5, 0],
@@ -98,7 +62,8 @@ class TestDensity(unittest.TestCase):
     def test_single_particle_center(self):
         n = np.array([3, 3])
         positions = np.array([[1.5, 1.5]])
-        rho = density(positions, n, np.array([1., 1.]), 1.0, 1.0)
+        charges = np.ones(1)
+        rho = density(positions, charges, n, np.array([1., 1.]))
         expected = np.array([
             [0, 0, 0],
             [0, 0.25, 0.25],
@@ -109,7 +74,8 @@ class TestDensity(unittest.TestCase):
     def test_single_particle_edge(self):
         n = np.array([3, 3])
         positions = np.array([[2, 2]])
-        rho = density(positions, n, np.array([1., 1.]), 1.0, 1.0)
+        charges = np.ones(1)
+        rho = density(positions, charges, n, np.array([1., 1.]))
         expected = np.array([
             [0, 0, 0],
             [0, 0, 0],
@@ -120,7 +86,8 @@ class TestDensity(unittest.TestCase):
     def test_two_particles_edges(self):
         n = np.array([3, 3])
         positions = np.array([[0, 0], [2, 2]])
-        rho = density(positions, n, np.array([1., 1.]), 1.0, 1.0)
+        charges = np.ones(2)
+        rho = density(positions, charges, n, np.array([1., 1.]))
         expected = np.array([
             [1, 0, 0],
             [0, 0, 0],
@@ -132,18 +99,18 @@ class TestDensity(unittest.TestCase):
         n = np.array([3, 3])
         N = np.random.randint(0, 100)
         positions = np.random.uniform(0, 3, (N, 2))
-        rho = density(positions, n, np.array([1., 1.]), 1.0, 1.0)
+        charges = np.ones(N)
+        rho = density(positions, charges, n, np.array([1., 1.]))
         self.assertEqual(rho.sum(), N)
 
     def test_multiple_particles_density(self):
         Lx = Ly = 64
         dx = dy = 1
-        # x, y = np.meshgrid(np.arange(0, Lx), np.arange(0, Ly))
-        positions = np.random.uniform(0, Ly, (10 ** 5, 2))
-        rho = density(positions, np.array([Lx, Ly]), np.array([1., 1.]), 1.0, 1.0)
+        N = 10 ** 5
+        positions = np.random.uniform(0, Ly, (N, 2))
+        charges = np.ones(N)
+        rho = density(positions, charges, np.array([Lx, Ly]), np.array([1., 1.]))
         plt.imshow(rho)
-        # fig, ax = plt.subplots()
-        # ax.title.set_text(r"$\omega_{\rm{pe}}$")
         color_map = plt.pcolormesh(rho, shading="gouraud", cmap="jet")
         bar = plt.colorbar(color_map)
         plt.xlim(0, Lx - dx)
@@ -151,20 +118,21 @@ class TestDensity(unittest.TestCase):
         plt.xlabel(r"$x / \lambda_D$", fontsize=25)
         plt.ylabel(r"$y / \lambda_D$", fontsize=25)
         bar.set_label(r"$\rho$", fontsize=25)
-        # ax.scatter(positions[:, 0], positions[:, 1], s=5, c='r', marker='o')
-        # ax.set_aspect("equal")
         plt.show()
 
-    def test_cpp(self):
-        positions, _, charges, _ = local_initial_state(r"tests\electrosctatic\two_stream.dat")
-        expected_rho = load_rho(r"tests\electrosctatic\rho\step_0_.dat")
-        rho = density(positions, charges, np.array([1, 1]) * 64, np.array([1., 1.]), 1.0, 1.0)
+    def test_data(self):
+        Lx = Ly = 64
+        positions, _, q_m, _ = local_initial_state(r"electrosctatic\two_stream.dat")
+        N = positions.shape[0]
+        expected_rho = load_rho(r"electrosctatic\rho\step_0_.dat")
+        charges = (Lx * Ly * q_m) / N
+        rho = density(positions, charges, np.array([Lx, Ly]), np.array([1., 1.]))
         np.testing.assert_allclose(rho, expected_rho, rtol=1e-5)
 
 
 class TestPotential(unittest.TestCase):
 
-    def test_cpp(self):
+    def test_data(self):
         rho = load_rho(r"electrosctatic\rho\step_0_.dat")
         expected_phi = load_rho(r"electrosctatic\phi\step_0_.dat")
         n = np.array([64, 64])
@@ -189,7 +157,8 @@ class TestPotential(unittest.TestCase):
         n = np.array([n_x, n_y])
         x, y = np.meshgrid(np.arange(0, Lx), np.arange(0, Ly))
         positions = np.random.uniform(0, Ly, (N, 2))
-        rho = density(positions, np.array([Lx, Ly]), delta_r, 1.0, 1.0)
+        charges = np.ones(N)
+        rho = density(positions, charges, np.array([Lx, Ly]), delta_r)
         # TODO: Plot rho
         phi = potential(rho, n, delta_r)
         fig, ax = plt.subplots()
@@ -243,14 +212,14 @@ class TestPhaseSpace(unittest.TestCase):
         n = np.array([n_x, n_y])
         dt = 0.1
         B = np.array([0, 0, 0])
-        positions, velocities, charges, moves = local_initial_state(r"electrosctatic\two_stream.dat")
+        positions, velocities, q_m, moves = local_initial_state(r"electrosctatic\two_stream.dat")
         expected_field = load_field(r"electrosctatic\Efield\step_0_.dat")
         expected_positions, expected_velocities = load_space(
             r"electrosctatic\phase_space\step_0_.dat")
-        e_field_p = field_particles(expected_field, positions, moves, n, delta_r)
-        velocities = boris(velocities, charges, moves, e_field_p, B, -0.5 * dt)
-        positions, velocities = update(positions, velocities, charges, moves, e_field_p, B, L, dt)
-        velocities = boris(velocities, charges, moves, e_field_p, B, 0.5 * dt)
+        e_field_p = field_particles(expected_field, positions, n, delta_r)
+        velocities = boris(velocities, q_m, e_field_p, B, -0.5 * dt)
+        positions, velocities = update(positions, velocities, q_m, e_field_p, B, L, dt)
+        velocities = boris(velocities, q_m, e_field_p, B, 0.5 * dt)
         np.testing.assert_allclose(positions[moves == 1], expected_positions, atol=5e-05)
         np.testing.assert_allclose(velocities[moves == 1], expected_velocities, atol=5.01835383e-06)
 

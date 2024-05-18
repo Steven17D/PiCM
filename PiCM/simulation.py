@@ -30,7 +30,7 @@ def density(positions: np.ndarray, charges, n, delta_r):
     ijs_diag = (ijs + [1, 1]) % n
     h = positions - ijs * delta_r
     h_n = delta_r - h
-    if rhos is None:
+    if rhos is None or rhos.shape[1:] != rho.shape:
         rhos = np.full((positions.shape[0], *rho.shape), rho)
 
     origin_values = h_n[:, 0] * h_n[:, 1] * charges
