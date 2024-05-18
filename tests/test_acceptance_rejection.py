@@ -3,18 +3,7 @@ import unittest
 import numpy as np
 from matplotlib import pyplot as plt
 from PiCM.acceptance_rejection import get_random_value
-
-n_e = 0.5
-v_th = 1
-v_d = 5
-
-
-def maxwell_distribution(v):
-    return (
-            (n_e / np.sqrt(2 * np.pi * (v_th ** 2))) * (
-            np.exp((-(v - v_d) ** 2) / (2 * (v_th ** 2))) + np.exp((-(v + v_d) ** 2) / (2 * (v_th ** 2)))
-    )
-    )
+from PiCM.main import maxwell_distribution
 
 
 class MyTestCase(unittest.TestCase):
@@ -29,10 +18,13 @@ class MyTestCase(unittest.TestCase):
         plt.show()
 
     def test_mb(self):
-        min_value, max_value = -10, 10
-        results = [get_random_value(maxwell_distribution, min_value, max_value, v_d) for _ in range(10000)]
+        v_th = 1
+        v_d = 5 * v_th
+        min_value, max_value = -v_d * 2, v_d * 2
+        distribution = lambda v: maxwell_distribution(v, v_d, v_th)
+        results = [get_random_value(distribution, min_value, max_value, v_d) for _ in range(10000)]
         xs = np.linspace(min_value, max_value, 1000)
-        ys = maxwell_distribution(xs)
+        ys = distribution(xs)
         fig, ax = plt.subplots()
         ax.hist(results, bins=100, density=True)
         ax.plot(xs, ys)
