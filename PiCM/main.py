@@ -8,6 +8,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib.animation import FFMpegWriter
 
+from PiCM.loader import local_initial_state
 from PiCM.simulation import simulate, density, potential
 from PiCM.acceptance_rejection import get_random_value
 
@@ -30,10 +31,18 @@ def setup(L, v_d, v_th, N):
     positions = np.array([np.random.uniform(0, l, [N]) for l in L]).T
     velocities = np.zeros([N, 3])
     vel_zero = np.zeros(int(N / 2))
-    vel = [get_random_value(lambda v: maxwell_distribution(v, v_d, v_th), -v_d * 3, v_d * 3, v_d) for _ in range(N // 2)]
+    vel = [get_random_value(lambda v: maxwell_distribution(v, v_d, v_th), -v_d * 2, v_d * 2, maxwell_distribution(v_d, v_d, v_th)) for _ in range(N // 2)]
     velocities[:, 0] = np.concatenate((vel_zero, vel))
     q_m = np.concatenate((np.ones(int(N / 2)), -np.ones(int(N / 2))))
     moves = np.concatenate((np.zeros(int(N / 2)), np.ones(int(N / 2))))
+    charges = (L[0] * L[1] * q_m) / N
+    masses = charges / q_m
+    return positions, velocities, q_m, charges, masses, moves
+
+
+def setup_from_file(L):
+    positions, velocities, q_m, moves = local_initial_state(r"tests/electrosctatic/two_stream.dat")
+    N = 99856
     charges = (L[0] * L[1] * q_m) / N
     masses = charges / q_m
     return positions, velocities, q_m, charges, masses, moves
@@ -64,10 +73,12 @@ def main():
     movers = moves == 1
     moving_masses = masses[movers]
     color = np.where(velocities[movers, 0] < 0, 'b', 'r')
+    Nd = 10
 
-    fig, ax = plt.subplots(2, 2)
+    fig, ax = plt.subplots(2, 3, figsize=(18, 12))
     ax_vx = ax[0, 0]
     ax_phi = ax[0, 1]
+    ax_xy = ax[0, 2]
     ax_vx_h = ax[1, 0]
     ax_energy = ax[1, 1]
 
@@ -76,6 +87,14 @@ def main():
     ax_vx.set_xlabel(r"$x / \lambda_D$")
     ax_vx.set_ylabel(r"$v_x / v_{th}$")
     ax_vx.grid()
+
+    Np = 40  # Amount of particles
+    xy_scatter = ax_xy.scatter(positions[movers, 0][::Np], positions[movers, 1][::Np], c=color[::Np], s=5, linewidth=0)
+    ax_xy.set_xlim([0, L[0]])
+    ax_xy.set_ylim([0, L[1]])
+    ax_xy.set_xlabel(r"$x / \lambda_D$")
+    ax_xy.set_ylabel(r"$y / \lambda_D$")
+    ax_xy.grid()
 
     ax_phi.set_title(r"$\omega_{\rm{pe}}$")
     ax_phi.set_xlim(0, (L - delta_r)[0])
@@ -101,7 +120,6 @@ def main():
     ax_energy.legend(loc="best")
     fig.tight_layout()
 
-    Nd = 10
     scatter = ax_vx.scatter(positions[movers, 0][::Nd], velocities[movers, 0][::Nd],
                             c=color[::Nd], s=5, linewidth=0)
 
@@ -119,6 +137,7 @@ def main():
             color_map.set_clim(min_phi, max_phi)
 
             scatter.set_offsets(np.c_[positions[:, 0][::Nd], velocities[:, 0][::Nd]])
+            xy_scatter.set_offsets(np.c_[positions[:, 0][::Np], positions[:, 1][::Np]])
 
             ax_vx_h.cla()
             ax_vx_h.hist(velocities[:, 0], density=True, range=(-v_d * 3, v_d * 3), bins=50,
@@ -137,6 +156,8 @@ def main():
 
             fig.canvas.draw_idle()
             writer.grab_frame()
+            if step % 10 == 0:
+                plt.show()
 
     plt.show()
     plt.close()

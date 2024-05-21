@@ -111,7 +111,7 @@ def field_nodes(phi: np.ndarray, n, delta_r):
 
 def field_particles(field: np.ndarray, positions: np.array, n, delta_r):
     dx, dy = delta_r
-    ijs = np.floor(positions / dy).astype(int)
+    ijs = np.floor(positions / delta_r).astype(int)
     h = positions - ijs * delta_r
     nxt_ijs = (ijs + 1) % n
     A = ((dx - h[:, 0]) * (dy - h[:, 1]))[:, np.newaxis] * field[ijs[:, 0], ijs[:, 1]]
