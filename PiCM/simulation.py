@@ -1,26 +1,22 @@
+"""
+Implementation of PiCM simulation.
+"""
+
 import numpy as np
 from tqdm import tqdm
 
 
-omega_pe = 1
+rhos = None  # Rhos are initialized once in order to improve performance
 
 
-def fft(v: np.ndarray) -> np.ndarray:
-    return np.fft.fft(v)
-
-
-def ifft(v: np.ndarray) -> np.ndarray:
-    return np.fft.ifft(v)
-
-
-rhos = None  # Rhos are initialized once for performance
-
-
-def density(positions: np.ndarray, charges, n, delta_r):
+def density(positions: np.ndarray, charges: np.array, n: np.array, delta_r: np.array) -> np.ndarray:
     """
-    Calculate the density of particles
-    :param positions:
-    :return:
+    Calculate the grid of charge density
+    :param positions: List of charge positions
+    :param charges: List of charges
+    :param n: Grid dimensions
+    :param delta_r: Grid cell size
+    :return: Grid of charge density
     """
     global rhos
     rho = np.zeros(n)
@@ -51,20 +47,21 @@ def density(positions: np.ndarray, charges, n, delta_r):
     return (rho / (delta_r[0] * delta_r[0] * delta_r[1] * delta_r[1])).T
 
 
-def potential(rho: np.ndarray, n, delta_r):
+def potential(rho: np.ndarray, n: np.array, delta_r: np.array) -> np.ndarray:
     """
     Calculate the potential (phi) from the charge density (rho)
-    TODO: Write the proof of the FFT from rho to phi
-    :param rho:
-    :return:
+    :param rho: Grid of charge density
+    :param n: Grid dimensions
+    :param delta_r: Grid cell size
+    :return: Potential of charge density in grid form
     """
     rho = rho.astype(np.complex64)
 
     # FFT rho to rho_k
     for xi in range(n[0]):
-        rho[xi, :] = fft(rho[xi, :])
+        rho[xi, :] = np.fft.fft(rho[xi, :])
     for yi in range(n[1]):
-        rho[:, yi] = fft(rho[:, yi])
+        rho[:, yi] = np.fft.fft(rho[:, yi])
 
     rho_k = rho
     # Calculate phi_k from rho_k
@@ -84,14 +81,21 @@ def potential(rho: np.ndarray, n, delta_r):
 
     # Inverse FFT phi_k to phi
     for xi in range(n[0]):
-        phi_k[xi, :] = ifft(phi_k[xi, :])
+        phi_k[xi, :] = np.fft.ifft(phi_k[xi, :])
     for yi in range(n[1]):
-        phi_k[:, yi] = ifft(phi_k[:, yi])
+        phi_k[:, yi] = np.fft.ifft(phi_k[:, yi])
 
     return np.real(phi_k)
 
 
-def field_nodes(phi: np.ndarray, n, delta_r):
+def field_nodes(phi: np.ndarray, n: np.array, delta_r: np.array) -> np.ndarray:
+    """
+    Calculate the electric field
+    :param rho: Grid of charge density
+    :param n: Grid dimensions
+    :param delta_r: Grid cell size
+    :return: Electric field in grid form
+    """
     E = np.zeros([*phi.shape, 3])
 
     for j in range(n[1]):
@@ -109,7 +113,15 @@ def field_nodes(phi: np.ndarray, n, delta_r):
     return E
 
 
-def field_particles(field: np.ndarray, positions: np.array, n, delta_r):
+def field_particles(field: np.ndarray, positions: np.ndarray, n: np.array, delta_r: np.array) -> np.ndarray:
+    """
+    Calculate the electric field exerted on each particle.
+    :param field: Electric field in grid form
+    :param positions: List of charge positions
+    :param n: Grid dimensions
+    :param delta_r: Grid cell size
+    :return: Electric field exerted on each particle
+    """
     dx, dy = delta_r
     ijs = np.floor(positions / delta_r).astype(int)
     h = positions - ijs * delta_r
@@ -122,7 +134,16 @@ def field_particles(field: np.ndarray, positions: np.array, n, delta_r):
     return E / (dx * dy)
 
 
-def boris(velocities, q_m, E, B, dt):
+def boris(velocities: np.ndarray, q_m: np.array, E: np.ndarray, B: np.array, dt: np.float64):
+    """
+    Calculate new velocities of particles in an electro-magnetic field using boris algorithm.
+    :param velocities: Velocities of particles
+    :param q_m: Charge to mass ration of particles
+    :param E: Electric field
+    :param B: Magnetic field
+    :param dt: Time step
+    :return: Velocities of particles
+    """
     u = 0.5 * q_m[:, np.newaxis] * B * dt
     s = (2.0 * u) / (1.0 + np.linalg.norm(u, axis=1) ** 2)[:, np.newaxis]
     qEt2m = 0.5 * q_m[:, np.newaxis] * E * dt
@@ -138,7 +159,22 @@ def update(positions, velocities, q_m, E, B, L, dt):
 
 
 def simulate(positions, velocities, q_m, charges, moves, L, n, delta_r, B, dt, steps):
+    """
+    Generate simulation steps.
+    :param positions: Positions of particles
+    :param velocities: Velocities of particles
+    :param q_m: Charge to mass ration of particles
+    :param charges: Charges of particles
+    :param moves: Move attribute of particles
+    :param L: System dimensions
+    :param n: Grid dimensions
+    :param delta_r: Grid cell size
+    :param B: Magnetic field
+    :param dt: Time step
+    :param steps: Number of simulation steps
+    """
     statics = moves == 0
+    # Calculate the static charge density grid
     static_rho = density(positions[statics], charges[statics], n, delta_r)
     moving = moves == 1
     moving_positions = positions[moving]
