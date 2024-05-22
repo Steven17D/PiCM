@@ -80,7 +80,8 @@ def main():
     ax_phi = ax[0, 1]
     ax_xy = ax[0, 2]
     ax_vx_h = ax[1, 0]
-    ax_energy = ax[1, 1]
+    ax_rho = ax[1, 1]
+    ax_energy = ax[1, 2]
 
     ax_vx.set_xlim([0, L[0]])
     ax_vx.set_ylim([-v_d * 3, v_d * 3])
@@ -96,15 +97,22 @@ def main():
     ax_xy.set_ylabel(r"$y / \lambda_D$")
     ax_xy.grid()
 
-    ax_phi.set_title(r"$\omega_{\rm{pe}}$")
-    ax_phi.set_xlim(0, (L - delta_r)[0])
-    ax_phi.set_ylim(0, (L - delta_r)[1])
+    ax_rho.set_xlim(0, (n - 1)[0])
+    ax_rho.set_ylim(0, (n - 1)[1])
+    ax_rho.set_xlabel(r"$x / \lambda_D$")
+    ax_rho.set_ylabel(r"$y / \lambda_D$")
+    rho = density(positions, charges, n, delta_r)
+    rho_color_map = ax_rho.pcolormesh(rho, shading="gouraud", cmap="jet")
+    rho_bar = plt.colorbar(rho_color_map, ax=ax_rho)
+    rho_bar.set_label(r"$\rho$")
+
+    ax_phi.set_xlim(0, (n - 1)[0])
+    ax_phi.set_ylim(0, (n - 1)[1])
     ax_phi.set_xlabel(r"$x / \lambda_D$")
     ax_phi.set_ylabel(r"$y / \lambda_D$")
-    rho = density(positions, charges, n, delta_r)
     phi = potential(rho, n, delta_r)
-    color_map = ax_phi.pcolormesh(phi, shading="gouraud", cmap="jet", vmin=-16, vmax=21)
-    bar = plt.colorbar(color_map, ax=ax_phi)
+    phi_color_map = ax_phi.pcolormesh(phi, shading="gouraud", cmap="jet")
+    bar = plt.colorbar(phi_color_map, ax=ax_phi)
     bar.set_label(r"$\phi / (T_e / e)$")
 
     times = np.arange(0, steps * dt, dt)
@@ -125,6 +133,7 @@ def main():
 
     metadata = dict(title=f'PiCM: N={N}, Steps={steps}')
     writer = FFMpegWriter(fps=24, metadata=metadata)
+    max_rho = min_rho = 0
     max_phi = min_phi = 0
     with writer.saving(fig, f'output/{time.strftime("%Y%m%d-%H%M%S")}.mp4', 200):
         for positions, velocities, rho, phi, e_field_n, step in \
@@ -132,9 +141,14 @@ def main():
             if step % 1 != 0:
                 continue
             fig.suptitle(r"$\omega_{\rm{pe}}$" + f"$t = {(step * dt):.2f}$")
-            color_map.update({'array': phi.T.ravel()})
+
+            rho_color_map.update({'array': rho.T.ravel()})
+            min_rho, max_rho = min(min_rho, np.min(rho)), max(max_rho, np.max(rho))
+            rho_color_map.set_clim(min_rho, max_rho)
+
+            phi_color_map.update({'array': phi.T.ravel()})
             min_phi, max_phi = min(min_phi, np.min(phi)), max(max_phi, np.max(phi))
-            color_map.set_clim(min_phi, max_phi)
+            phi_color_map.set_clim(min_phi, max_phi)
 
             scatter.set_offsets(np.c_[positions[:, 0][::Nd], velocities[:, 0][::Nd]])
             xy_scatter.set_offsets(np.c_[positions[:, 0][::Np], positions[:, 1][::Np]])
@@ -156,7 +170,7 @@ def main():
 
             fig.canvas.draw_idle()
             writer.grab_frame()
-            if step % 10 == 0:
+            if (step+1) % 50 == 0:
                 plt.show()
 
     plt.show()
