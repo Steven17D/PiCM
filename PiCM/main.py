@@ -75,7 +75,7 @@ def main():
     color = np.where(velocities[movers, 0] < 0, 'b', 'r')
     Nd = 10
 
-    fig, ax = plt.subplots(2, 3, figsize=(18, 12))
+    fig, ax = plt.subplots(2, 3, figsize=(18, 10))
     ax_vx = ax[0, 0]
     ax_phi = ax[0, 1]
     ax_xy = ax[0, 2]
@@ -104,7 +104,7 @@ def main():
     rho = density(positions, charges, n, delta_r)
     rho_color_map = ax_rho.pcolormesh(rho, shading="gouraud", cmap="jet")
     rho_bar = plt.colorbar(rho_color_map, ax=ax_rho)
-    rho_bar.set_label(r"$\rho$")
+    rho_bar.set_label(r"$\rho / (e\lambda_D^{-2})$")
 
     ax_phi.set_xlim(0, (n - 1)[0])
     ax_phi.set_ylim(0, (n - 1)[1])
@@ -170,7 +170,7 @@ def main():
 
             fig.canvas.draw_idle()
             writer.grab_frame()
-            if (step+1) % 50 == 0:
+            if step != 0 and step % 30 == 0:
                 plt.show()
 
     plt.show()
