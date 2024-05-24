@@ -148,7 +148,17 @@ def main():
                                c=vx_color[::Nd], s=5, linewidth=0)
 
     vy_scatter = ax_vy.scatter(positions[movers, 1][::Nd], velocities[movers, 1][::Nd],
-                               c=vy_color[::Nd], s=5, linewidth=0)
+                               c=vx_color[::Nd], s=5, linewidth=0)
+
+    _, _, vx_bars = ax_vx_h.hist(velocities[:, 0], density=True, range=(-v_d * 3, v_d * 3), bins=50, color="red")
+    ax_vx_h.set_ylim([0, 0.22])
+    ax_vx_h.set_xlabel(r"$v_x / v_{\rm{th}}$", **font)
+    ax_vx_h.grid()
+
+    h, _, vy_bars = ax_vy_h.hist(velocities[:, 1], density=True, range=(-v_d * 3, v_d * 3), bins=50, color="red")
+    ax_vy_h.set_ylim([0, 0.22])
+    ax_vy_h.set_xlabel(r"$v_y / v_{\rm{th}}$", **font)
+    ax_vy_h.grid()
 
     metadata = dict(title=f'PiCM: N={N}, Steps={steps}')
     writer = FFMpegWriter(fps=24, metadata=metadata)
@@ -173,19 +183,15 @@ def main():
             vy_scatter.set_offsets(np.c_[positions[:, 1][::Nd], velocities[:, 1][::Nd]])
             xy_scatter.set_offsets(np.c_[positions[:, 0][::Np], positions[:, 1][::Np]])
 
-            ax_vx_h.cla()
-            ax_vx_h.hist(velocities[:, 0], density=True, range=(-v_d * 3, v_d * 3), bins=50,
-                         color="red")
-            ax_vx_h.set_ylim([0, 0.22])
-            ax_vx_h.set_xlabel(r"$v_x / v_{\rm{th}}$")
-            ax_vx_h.grid()
+            n, _ = np.histogram(velocities[:, 0], 50, density=True, range=(-v_d * 3, v_d * 3))
+            for count, rect in zip(n, vx_bars.patches):
+                rect.set_height(count)
+            ax_vx_h.set_ylim([0, max(n.max(), 0.20) * 1.1])
 
-            ax_vy_h.cla()
-            h, *_ = ax_vy_h.hist(velocities[:, 1], density=True, range=(-v_d * 3, v_d * 3), bins=50,
-                                 color="red")
-            ax_vy_h.set_ylim([0, max(h.max(), 0.22)])
-            ax_vy_h.set_xlabel(r"$v_y / v_{\rm{th}}$")
-            ax_vy_h.grid()
+            n, _ = np.histogram(velocities[:, 1], 50, density=True, range=(-v_d * 3, v_d * 3))
+            for count, rect in zip(n, vy_bars.patches):
+                rect.set_height(count)
+            ax_vy_h.set_ylim([0, max(n.max(), 0.20) * 1.1])
 
             kinetic_energies[step] = calculate_kinetic_energy(velocities, moving_masses)
             field_energies[step] = (rho * phi).sum() * 0.5
