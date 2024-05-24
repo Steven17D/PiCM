@@ -195,7 +195,6 @@ def main():
             total_total_plot.set_data(times[:step + 1], total_energy)
             ax_energy.set_ylim([0, total_energy.max() * 1.1])
 
-            fig.canvas.draw_idle()
             writer.grab_frame()
             if step == 20:
                 plt.show()
