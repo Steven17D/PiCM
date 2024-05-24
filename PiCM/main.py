@@ -28,11 +28,17 @@ def maxwell_distribution(v, v_d, v_th):
 
 
 def setup(L, v_d, v_th, N):
+    two_streams = False
     positions = np.array([np.random.uniform(0, l, [N]) for l in L]).T
     velocities = np.zeros([N, 3])
     vel_zero = np.zeros(int(N / 2))
-    vel = [get_random_value(lambda v: maxwell_distribution(v, v_d, v_th), -v_d * 2, v_d * 2, maxwell_distribution(v_d, v_d, v_th)) for _ in range(N // 2)]
-    velocities[:, 0] = np.concatenate((vel_zero, vel))
+    velx = [get_random_value(lambda v: maxwell_distribution(v, v_d, v_th), -v_d * 2, v_d * 2,
+                             maxwell_distribution(v_d, v_d, v_th)) for _ in range(N // 2)]
+    velocities[:, 0] = np.concatenate((vel_zero, velx))
+    if two_streams:
+        vely = [get_random_value(lambda v: maxwell_distribution(v, v_d, v_th), -v_d * 2, v_d * 2,
+                                 maxwell_distribution(v_d, v_d, v_th)) for _ in range(N // 2)]
+        velocities[:, 1] = np.concatenate((vel_zero, vely))
     q_m = np.concatenate((np.ones(int(N / 2)), -np.ones(int(N / 2))))
     moves = np.concatenate((np.zeros(int(N / 2)), np.ones(int(N / 2))))
     charges = (L[0] * L[1] * q_m) / N
@@ -72,48 +78,59 @@ def main():
     positions, velocities, q_m, charges, masses, moves = setup(L, v_d, v_th, N)
     movers = moves == 1
     moving_masses = masses[movers]
-    color = np.where(velocities[movers, 0] < 0, 'b', 'r')
+    vx_color = np.where(velocities[movers, 0] < 0, 'b', 'r')
+    vy_color = np.where(velocities[movers, 1] < 0, 'b', 'r')
     Nd = 10
 
-    fig, ax = plt.subplots(2, 3, figsize=(18, 10))
+    font = dict(fontsize=22)
+    fig, ax = plt.subplots(2, 4, figsize=(24, 10), constrained_layout=True)
     ax_vx = ax[0, 0]
-    ax_phi = ax[0, 1]
-    ax_xy = ax[0, 2]
+    ax_vy = ax[0, 1]
+    ax_phi = ax[0, 2]
+    ax_xy = ax[0, 3]
     ax_vx_h = ax[1, 0]
-    ax_rho = ax[1, 1]
-    ax_energy = ax[1, 2]
+    ax_vy_h = ax[1, 1]
+    ax_rho = ax[1, 2]
+    ax_energy = ax[1, 3]
 
     ax_vx.set_xlim([0, L[0]])
     ax_vx.set_ylim([-v_d * 3, v_d * 3])
-    ax_vx.set_xlabel(r"$x / \lambda_D$")
-    ax_vx.set_ylabel(r"$v_x / v_{th}$")
+    ax_vx.set_xlabel(r"$x / \lambda_D$", **font)
+    ax_vx.set_ylabel(r"$v_x / v_{th}$", **font)
     ax_vx.grid()
 
+    ax_vy.set_xlim([0, L[1]])
+    ax_vy.set_ylim([-v_d * 3, v_d * 3])
+    ax_vy.set_xlabel(r"$y / \lambda_D$", **font)
+    ax_vy.set_ylabel(r"$v_y / v_{th}$", **font)
+    ax_vy.grid()
+
     Np = 40  # Amount of particles
-    xy_scatter = ax_xy.scatter(positions[movers, 0][::Np], positions[movers, 1][::Np], c=color[::Np], s=5, linewidth=0)
+    xy_scatter = ax_xy.scatter(positions[movers, 0][::Np], positions[movers, 1][::Np], c=vx_color[::Np], s=5,
+                               linewidth=0)
     ax_xy.set_xlim([0, L[0]])
     ax_xy.set_ylim([0, L[1]])
-    ax_xy.set_xlabel(r"$x / \lambda_D$")
-    ax_xy.set_ylabel(r"$y / \lambda_D$")
+    ax_xy.set_xlabel(r"$x / \lambda_D$", **font)
+    ax_xy.set_ylabel(r"$y / \lambda_D$", **font)
     ax_xy.grid()
 
     ax_rho.set_xlim(0, (n - 1)[0])
     ax_rho.set_ylim(0, (n - 1)[1])
-    ax_rho.set_xlabel(r"$x / \lambda_D$")
-    ax_rho.set_ylabel(r"$y / \lambda_D$")
+    ax_rho.set_xlabel(r"$x / \lambda_D$", **font)
+    ax_rho.set_ylabel(r"$y / \lambda_D$", **font)
     rho = density(positions, charges, n, delta_r)
     rho_color_map = ax_rho.pcolormesh(rho, shading="gouraud", cmap="jet")
     rho_bar = plt.colorbar(rho_color_map, ax=ax_rho)
-    rho_bar.set_label(r"$\rho / (e\lambda_D^{-2})$")
+    rho_bar.set_label(r"$\rho / (e\lambda_D^{-2})$", **font)
 
     ax_phi.set_xlim(0, (n - 1)[0])
     ax_phi.set_ylim(0, (n - 1)[1])
-    ax_phi.set_xlabel(r"$x / \lambda_D$")
-    ax_phi.set_ylabel(r"$y / \lambda_D$")
+    ax_phi.set_xlabel(r"$x / \lambda_D$", **font)
+    ax_phi.set_ylabel(r"$y / \lambda_D$", **font)
     phi = potential(rho, n, delta_r)
     phi_color_map = ax_phi.pcolormesh(phi, shading="gouraud", cmap="jet")
     bar = plt.colorbar(phi_color_map, ax=ax_phi)
-    bar.set_label(r"$\phi / (T_e / e)$")
+    bar.set_label(r"$\phi / (T_e / e)$", **font)
 
     times = np.arange(0, steps * dt, dt)
     kinetic_energies = np.empty(steps)
@@ -122,14 +139,16 @@ def main():
     field_energy_plot, = ax_energy.plot([], [], label="Field")
     total_total_plot, = ax_energy.plot([], [], label="Total")
     ax_energy.set_xlim([0, steps * dt])
-    ax_energy.set_xlabel(r"$\omega_{\rm{pe}}t$")
-    ax_energy.set_ylabel(r"$E / (n_0 T_e / \varepsilon_0)$")
+    ax_energy.set_xlabel(r"$\omega_{\rm{pe}}t$", **font)
+    ax_energy.set_ylabel(r"$E / (n_0 T_e / \varepsilon_0)$", **font)
     ax_energy.grid()
     ax_energy.legend(loc="best")
-    fig.tight_layout()
 
-    scatter = ax_vx.scatter(positions[movers, 0][::Nd], velocities[movers, 0][::Nd],
-                            c=color[::Nd], s=5, linewidth=0)
+    vx_scatter = ax_vx.scatter(positions[movers, 0][::Nd], velocities[movers, 0][::Nd],
+                               c=vx_color[::Nd], s=5, linewidth=0)
+
+    vy_scatter = ax_vy.scatter(positions[movers, 1][::Nd], velocities[movers, 1][::Nd],
+                               c=vy_color[::Nd], s=5, linewidth=0)
 
     metadata = dict(title=f'PiCM: N={N}, Steps={steps}')
     writer = FFMpegWriter(fps=24, metadata=metadata)
@@ -140,7 +159,7 @@ def main():
                 simulate(positions, velocities, q_m, charges, moves, L, n, delta_r, B, dt, steps):
             if step % 1 != 0:
                 continue
-            fig.suptitle(r"$\omega_{\rm{pe}}$" + f"$t = {(step * dt):.2f}$")
+            fig.suptitle(r"$\omega_{\rm{pe}}$" + f"$t = {(step * dt):.2f}$", **font)
 
             rho_color_map.update({'array': rho.T.ravel()})
             min_rho, max_rho = min(min_rho, np.min(rho)), max(max_rho, np.max(rho))
@@ -150,7 +169,8 @@ def main():
             min_phi, max_phi = min(min_phi, np.min(phi)), max(max_phi, np.max(phi))
             phi_color_map.set_clim(min_phi, max_phi)
 
-            scatter.set_offsets(np.c_[positions[:, 0][::Nd], velocities[:, 0][::Nd]])
+            vx_scatter.set_offsets(np.c_[positions[:, 0][::Nd], velocities[:, 0][::Nd]])
+            vy_scatter.set_offsets(np.c_[positions[:, 1][::Nd], velocities[:, 1][::Nd]])
             xy_scatter.set_offsets(np.c_[positions[:, 0][::Np], positions[:, 1][::Np]])
 
             ax_vx_h.cla()
@@ -159,6 +179,13 @@ def main():
             ax_vx_h.set_ylim([0, 0.22])
             ax_vx_h.set_xlabel(r"$v_x / v_{\rm{th}}$")
             ax_vx_h.grid()
+
+            ax_vy_h.cla()
+            h, *_ = ax_vy_h.hist(velocities[:, 1], density=True, range=(-v_d * 3, v_d * 3), bins=50,
+                                 color="red")
+            ax_vy_h.set_ylim([0, max(h.max(), 0.22)])
+            ax_vy_h.set_xlabel(r"$v_y / v_{\rm{th}}$")
+            ax_vy_h.grid()
 
             kinetic_energies[step] = calculate_kinetic_energy(velocities, moving_masses)
             field_energies[step] = (rho * phi).sum() * 0.5
@@ -170,7 +197,7 @@ def main():
 
             fig.canvas.draw_idle()
             writer.grab_frame()
-            if step != 0 and step % 30 == 0:
+            if step == 20:
                 plt.show()
 
     plt.show()
