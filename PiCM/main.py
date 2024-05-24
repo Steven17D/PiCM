@@ -164,7 +164,8 @@ def main():
     writer = FFMpegWriter(fps=24, metadata=metadata)
     max_rho = min_rho = 0
     max_phi = min_phi = 0
-    with writer.saving(fig, f'output/{time.strftime("%Y%m%d-%H%M%S")}.mp4', 200):
+    name = f'output/{time.strftime("%Y%m%d-%H%M%S")}'
+    with writer.saving(fig, f'{name}.mp4', 200):
         for positions, velocities, rho, phi, e_field_n, step in \
                 simulate(positions, velocities, q_m, charges, moves, L, n, delta_r, B, dt, steps):
             if step % 1 != 0:
@@ -202,6 +203,10 @@ def main():
             ax_energy.set_ylim([0, total_energy.max() * 1.1])
 
             writer.grab_frame()
+
+            if step % 50 == 0:
+                fig.savefig(f"{name}-{step}.png", dpi=500)
+
             if step == 20:
                 plt.show()
 
