@@ -55,7 +55,7 @@ def potential(rho: np.ndarray, n: np.array, delta_r: np.array) -> np.ndarray:
     :param delta_r: Grid cell size
     :return: Potential of charge density in grid form
     """
-    rho = rho.astype(np.complex64)
+    rho = rho.astype(complex)
 
     # FFT rho to rho_k
     for xi in range(n[0]):
@@ -70,7 +70,7 @@ def potential(rho: np.ndarray, n: np.array, delta_r: np.array) -> np.ndarray:
     Wn, Wm = 1, 1
     dx_2, dy_2 = delta_r ** 2
 
-    phi_k = np.empty_like(rho_k, dtype=np.complex64)
+    phi_k = np.empty_like(rho_k, dtype=complex)
     for ni in range(n[0]):
         for m in range(n[1]):
             denom = dy_2 * (2.0 - Wn - 1.0 / Wn) + dx_2 * (2.0 - Wm - 1.0 / Wm)
