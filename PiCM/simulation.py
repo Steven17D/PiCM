@@ -20,7 +20,7 @@ def density(positions: np.ndarray, charges: np.array, n: np.array, delta_r: np.a
     """
     global rhos
     rho = np.zeros(n)
-    ijs = np.floor(positions / delta_r).astype(int)  # TODO: Check round of floor
+    ijs = np.floor(positions / delta_r).astype(int)
     ijs_up = (ijs + [0, 1]) % n
     ijs_right = (ijs + [1, 0]) % n
     ijs_diag = (ijs + [1, 1]) % n
