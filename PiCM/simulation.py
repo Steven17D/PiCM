@@ -220,3 +220,7 @@ def simulate(positions, velocities, q_m, charges, moves, L, n, delta_r, B, dt, s
                                                      L, dt)
         new_velocities = boris(moving_velocities, moving_q_m, e_field_p, B, 0.5 * dt)
         yield moving_positions, new_velocities, rho, phi, e_field_n, step
+
+
+def calculate_kinetic_energy(velocities, masses):
+    return (masses * (velocities[:, 0] ** 2 + velocities[:, 1] ** 2)).sum() / 2

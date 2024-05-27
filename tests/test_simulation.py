@@ -7,8 +7,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from PiCM.loader import local_initial_state, load_rho, load_field, load_space, load_energy, load_config
-from PiCM.main import calculate_kinetic_energy
-from PiCM.simulation import density, boris, field_nodes, field_particles, potential, update
+from PiCM.simulation import density, boris, field_nodes, field_particles, potential, update, calculate_kinetic_energy
 
 
 class TestDensity(unittest.TestCase):

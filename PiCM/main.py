@@ -8,7 +8,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib.animation import FFMpegWriter
 
-from PiCM.simulation import simulate, density, potential
+from PiCM.simulation import simulate, density, potential, calculate_kinetic_energy
 from PiCM.probability import get_random_value, maxwell_distribution
 
 matplotlib.style.use('classic')
@@ -31,10 +31,6 @@ def setup(L, v_d, v_th, N):
     charges = (L[0] * L[1] * q_m) / N
     masses = charges / q_m
     return positions, velocities, q_m, charges, masses, moves
-
-
-def calculate_kinetic_energy(velocities, masses):
-    return (masses * (velocities[:, 0] ** 2 + velocities[:, 1] ** 2)).sum() / 2
 
 
 def main():
