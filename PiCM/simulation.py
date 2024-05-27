@@ -1,24 +1,27 @@
 """
 Implementation of PiCM simulation.
 """
+import os
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 from tqdm import tqdm
 
 
-rhos = None  # Rhos are initialized once in order to improve performance
+grhos: np.ndarray = None
 
 
-def density(positions: np.ndarray, charges: np.array, n: np.array, delta_r: np.array) -> np.ndarray:
+def _density(positions: np.ndarray, charges: np.array, i: int, n: np.array, delta_r: np.array) -> np.ndarray:
     """
     Calculate the grid of charge density
     :param positions: List of charge positions
     :param charges: List of charges
+    :param i: Index of global rho buffer
     :param n: Grid dimensions
     :param delta_r: Grid cell size
     :return: Grid of charge density
     """
-    global rhos
+    global grhos
     rho = np.zeros(n)
     ijs = np.floor(positions / delta_r).astype(int)
     ijs_up = (ijs + [0, 1]) % n
@@ -26,8 +29,8 @@ def density(positions: np.ndarray, charges: np.array, n: np.array, delta_r: np.a
     ijs_diag = (ijs + [1, 1]) % n
     h = positions - ijs * delta_r
     h_n = delta_r - h
-    if rhos is None or rhos.shape[1:] != rho.shape:
-        rhos = np.full((positions.shape[0], *rho.shape), rho)
+
+    rhos = grhos[i]
 
     origin_values = h_n[:, 0] * h_n[:, 1] * charges
     up_values = h_n[:, 0] * h[:, 1] * charges
@@ -45,6 +48,31 @@ def density(positions: np.ndarray, charges: np.array, n: np.array, delta_r: np.a
     np.add.reduce(rhos, axis=0, out=rho)
     np.put(rhos, flat_indices, 0)
     return (rho / (delta_r[0] * delta_r[0] * delta_r[1] * delta_r[1])).T
+
+
+def density(positions: np.ndarray, charges: np.array, n: np.array, delta_r: np.array):
+    """
+    Calculate the charge density in parallel.
+    """
+    global grhos
+
+    thread_count = os.cpu_count()
+    chunk_size = positions.shape[0] // thread_count
+    if grhos is None:
+        grhos = np.zeros((thread_count, chunk_size, *n))
+
+    remainder = positions.shape[0] % thread_count
+    remainder_positions = positions[-remainder:]
+    remainder_charges = charges[-remainder:]
+    remainder_rho = _density(remainder_positions, remainder_charges, 0, n, delta_r)
+
+    with ThreadPoolExecutor(max_workers=thread_count) as e:
+        results = e.map(lambda p: _density(p[0], p[1], p[2], n, delta_r),
+                        zip(np.split(positions[:-remainder], thread_count),
+                            np.split(charges[:-remainder], thread_count),
+                            range(thread_count))
+                        )
+        return np.sum(results, axis=0) + remainder_rho
 
 
 def potential(rho: np.ndarray, n: np.array, delta_r: np.array) -> np.ndarray:
