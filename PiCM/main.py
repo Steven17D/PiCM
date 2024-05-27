@@ -8,23 +8,10 @@ import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib.animation import FFMpegWriter
 
-from PiCM.loader import local_initial_state
 from PiCM.simulation import simulate, density, potential
-from PiCM.acceptance_rejection import get_random_value
+from PiCM.probability import get_random_value, maxwell_distribution
 
 matplotlib.style.use('classic')
-
-
-def maxwell_distribution(v, v_d, v_th):
-    """
-    Velocity distribution
-    """
-    n_e = 0.5  # In order to normalize area
-    return (
-            (n_e / np.sqrt(2 * np.pi * (v_th ** 2))) * (
-            np.exp((-(v - v_d) ** 2) / (2 * (v_th ** 2))) + np.exp((-(v + v_d) ** 2) / (2 * (v_th ** 2)))
-    )
-    )
 
 
 def setup(L, v_d, v_th, N):
@@ -46,14 +33,6 @@ def setup(L, v_d, v_th, N):
     return positions, velocities, q_m, charges, masses, moves
 
 
-def setup_from_file(L):
-    positions, velocities, q_m, moves = local_initial_state(r"tests/electrosctatic/two_stream.dat")
-    N = 99856
-    charges = (L[0] * L[1] * q_m) / N
-    masses = charges / q_m
-    return positions, velocities, q_m, charges, masses, moves
-
-
 def calculate_kinetic_energy(velocities, masses):
     return (masses * (velocities[:, 0] ** 2 + velocities[:, 1] ** 2)).sum() / 2
 
@@ -65,7 +44,7 @@ def main():
     L = np.array([1, 1]) * 64 * debye_length  # size of the system
     n = np.array([1, 1]) * 64
     dt = 0.1
-    steps = 500
+    steps = 501
     v_d = 5.0 * v_th  # Drift velocity
     N = 100000
 

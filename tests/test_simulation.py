@@ -125,13 +125,9 @@ class TestDensity(unittest.TestCase):
         N, L, n = load_config(r"electrosctatic\sim_two_stream.json")
         delta_r = L / n
         positions, _, q_m, _ = local_initial_state(r"electrosctatic\two_stream.dat")
-        expected_rho = load_rho(r"electrosctatic\rho\first_rho0.dat", n, delta_r)
+        expected_rho = load_rho(r"electrosctatic\rho\step_0_.dat", n, delta_r)
         charges = (L[0] * L[1] * q_m) / N
-        # rho = density(positions, charges, n, delta_r)
-        split = positions.shape[0] // 10000
-        rho = np.sum([density(p, c, n, delta_r) for p, c in zip(
-            np.split(positions, split),
-            np.split(charges, split))], axis=0)
+        rho = density(positions, charges, n, delta_r)
         np.testing.assert_allclose(rho, expected_rho, rtol=1e-5)
 
 

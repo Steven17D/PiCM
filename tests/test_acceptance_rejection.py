@@ -2,8 +2,7 @@ import unittest
 
 import numpy as np
 from matplotlib import pyplot as plt
-from PiCM.acceptance_rejection import get_random_value
-from PiCM.main import maxwell_distribution
+from PiCM.probability import get_random_value, maxwell_distribution
 
 
 class MyTestCase(unittest.TestCase):

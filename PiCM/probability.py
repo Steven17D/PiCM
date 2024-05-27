@@ -4,6 +4,18 @@ Based on chapter 3.3 "The acceptance-rejection method" from Statistical Data Ana
 import numpy as np
 
 
+def maxwell_distribution(v, v_d, v_th):
+    """
+    Velocity distribution
+    """
+    n_e = 0.5  # In order to normalize area
+    return (
+            (n_e / np.sqrt(2 * np.pi * (v_th ** 2))) * (
+            np.exp((-(v - v_d) ** 2) / (2 * (v_th ** 2))) + np.exp((-(v + v_d) ** 2) / (2 * (v_th ** 2)))
+    )
+    )
+
+
 def get_random_value(distribution_function, x_min, x_max, f_max):
     """
     Function to generate a random value from a distribution function
