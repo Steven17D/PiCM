@@ -44,7 +44,6 @@ class TestPotential(unittest.TestCase):
         positions = np.random.uniform(0, Ly, (N, 2))
         charges = np.ones(N)
         rho = density(positions, charges, np.array([Lx, Ly]), delta_r)
-        # TODO: Plot rho
         phi = potential(rho, n, delta_r)
         fig, ax = plt.subplots()
         ax.title.set_text(r"$\omega_{\rm{pe}}$")
