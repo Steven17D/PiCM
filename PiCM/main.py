@@ -14,18 +14,40 @@ from PiCM.probability import get_random_value, maxwell_distribution
 matplotlib.style.use('classic')
 
 
-def setup(L, v_d, v_th, N):
-    two_streams = False
-    positions = np.array([np.random.uniform(0, l, [N]) for l in L]).T
+def create_x_velocities(N, v_d, v_th):
     velocities = np.zeros([N, 3])
     vel_zero = np.zeros(int(N / 2))
     velx = [get_random_value(lambda v: maxwell_distribution(v, v_d, v_th), -v_d * 2, v_d * 2,
                              maxwell_distribution(v_d, v_d, v_th)) for _ in range(N // 2)]
     velocities[:, 0] = np.concatenate((vel_zero, velx))
-    if two_streams:
-        vely = [get_random_value(lambda v: maxwell_distribution(v, v_d, v_th), -v_d * 2, v_d * 2,
-                                 maxwell_distribution(v_d, v_d, v_th)) for _ in range(N // 2)]
-        velocities[:, 1] = np.concatenate((vel_zero, vely))
+    return velocities
+
+
+def create_xy_velocities(N, v_d, v_th):
+    velocities = np.zeros([N, 3])
+    vel_zero = np.zeros(int(N / 2))
+    velx = [get_random_value(lambda v: maxwell_distribution(v, v_d, v_th), -v_d * 2, v_d * 2,
+                             maxwell_distribution(v_d, v_d, v_th)) for _ in range(N // 2)]
+    velocities[:, 0] = np.concatenate((vel_zero, velx))
+    vely = [get_random_value(lambda v: maxwell_distribution(v, v_d, v_th), -v_d * 2, v_d * 2,
+                             maxwell_distribution(v_d, v_d, v_th)) for _ in range(N // 2)]
+    velocities[:, 1] = np.concatenate((vel_zero, vely))
+    return velocities
+
+
+def create_diagonal_velocities(N, v_d, v_th):
+    velocities = np.zeros([N, 3])
+    vel_zero = np.zeros(int(N / 2))
+    vel = [get_random_value(lambda v: maxwell_distribution(v, v_d, v_th), -v_d * 2, v_d * 2,
+                             maxwell_distribution(v_d, v_d, v_th)) for _ in range(N // 2)]
+    velocities[:, 0] = np.concatenate((vel_zero, vel))
+    velocities[:, 1] = np.concatenate((vel_zero, vel))
+    return velocities
+
+
+def setup(L, v_d, v_th, N):
+    positions = np.array([np.random.uniform(0, l, [N]) for l in L]).T
+    velocities = create_diagonal_velocities(N, v_d, v_th)
     q_m = np.concatenate((np.ones(int(N / 2)), -np.ones(int(N / 2))))
     moves = np.concatenate((np.zeros(int(N / 2)), np.ones(int(N / 2))))
     charges = (L[0] * L[1] * q_m) / N
@@ -54,7 +76,7 @@ def main():
     movers = moves == 1
     moving_masses = masses[movers]
     vx_color = np.where(velocities[movers, 0] < 0, 'b', 'r')
-    vy_color = np.where(velocities[movers, 1] < 0, 'b', 'r')
+    vy_color = vx_color if (velocities[movers, 0]).all() else np.where(velocities[movers, 1] < 0, 'b', 'r')
     Nd = 10
 
     font = dict(fontsize=22)
@@ -123,7 +145,7 @@ def main():
                                c=vx_color[::Nd], s=5, linewidth=0)
 
     vy_scatter = ax_vy.scatter(positions[movers, 1][::Nd], velocities[movers, 1][::Nd],
-                               c=vx_color[::Nd], s=5, linewidth=0)
+                               c=vy_color[::Nd], s=5, linewidth=0)
 
     _, _, vx_bars = ax_vx_h.hist(velocities[:, 0], density=True, range=(-v_d * 3, v_d * 3), bins=50, color="red")
     ax_vx_h.set_ylim([0, 0.22])
