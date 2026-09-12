@@ -17,6 +17,9 @@ import types
 from pathlib import Path
 
 import imageio_ffmpeg
+import matplotlib
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FFMpegWriter
@@ -31,17 +34,22 @@ BASELINE = "555dce2"
 FIXED = "fd720e5"
 FIXTURE = REPO / "tests" / "electrosctatic"
 OUTPUT_DIR = Path.home() / "Movies" / "PiCM"
-MP4_PATH = OUTPUT_DIR / "resolution-comparison-long.mp4"
-PNG_PATH = OUTPUT_DIR / "resolution-comparison-long.png"
+MP4_PATH = OUTPUT_DIR / "resolution-comparison-all-diagrams.mp4"
+PNG_PATH = OUTPUT_DIR / "resolution-comparison-all-diagrams.png"
 
 N_CELLS = 256
 DT = 0.1
 STEPS = 1001
 FPS = 15
-FIGSIZE = (12.8, 8.0)
+FIGSIZE = (24.0, 16.0)
 DPI = 100
+HIST_BINS = 50
 ORANGE = "#e67e22"
 BLUE = "#4ea3f1"
+RED = "#e05d5d"
+KINETIC_COLOR = "#f0c14b"
+FIELD_COLOR = "#7fd99a"
+TOTAL_COLOR = "#f2f5f8"
 FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
 
 
@@ -90,16 +98,31 @@ def load_inputs():
     }
 
 
-def run_version(module, energy_fn, state):
+def baseline_field_energy(_module, rho, phi, _state):
+    return 0.5 * float(np.dot(rho.ravel(), phi.ravel()))
+
+
+def fixed_field_energy(module, rho, phi, state):
+    return float(module.calculate_field_energy(rho, phi, state["delta_r"]))
+
+
+def run_version(module, field_energy_fn, state, label):
+    print(f"run {label}", flush=True)
     positions = state["positions"].copy()
     velocities = state["velocities"].copy()
     q_m = state["q_m"].copy()
     charges = state["charges"].copy()
     moves = state["moves"].copy()
     n_moving = int(np.count_nonzero(moves == 1))
+    nx, ny = int(state["n"][0]), int(state["n"][1])
     xs = np.empty((STEPS, n_moving), dtype=np.float64)
     ys = np.empty((STEPS, n_moving), dtype=np.float64)
     vxs = np.empty((STEPS, n_moving), dtype=np.float64)
+    vys = np.empty((STEPS, n_moving), dtype=np.float64)
+    rhos = np.empty((STEPS, nx, ny), dtype=np.float32)
+    phis = np.empty((STEPS, nx, ny), dtype=np.float32)
+    kinetic = np.empty(STEPS, dtype=np.float64)
+    field = np.empty(STEPS, dtype=np.float64)
     energy = np.empty(STEPS, dtype=np.float64)
     for moving_xy, vel, rho, phi, _, step in module.simulate(
         positions,
@@ -117,18 +140,26 @@ def run_version(module, energy_fn, state):
         xs[step] = moving_xy[:, 0]
         ys[step] = moving_xy[:, 1]
         vxs[step] = vel[:, 0]
-        energy[step] = energy_fn(module, vel, rho, phi, state)
-    return {"x": xs, "y": ys, "vx": vxs, "energy": energy}
-
-
-def baseline_energy(module, vel, rho, phi, state):
-    kinetic = module.calculate_kinetic_energy(vel, state["mass"])
-    return 0.5 * np.sum(rho * phi) + kinetic
-
-
-def fixed_energy(module, vel, rho, phi, state):
-    kinetic = module.calculate_kinetic_energy(vel, state["mass"])
-    return module.calculate_field_energy(rho, phi, state["delta_r"]) + kinetic
+        vys[step] = vel[:, 1]
+        rhos[step] = rho
+        phis[step] = phi
+        kinetic[step] = module.calculate_kinetic_energy(vel, state["mass"])
+        field[step] = field_energy_fn(module, rho, phi, state)
+        energy[step] = kinetic[step] + field[step]
+        if step % 250 == 0 or step + 1 == STEPS:
+            print(f"run {label}  step {step}/{STEPS - 1}", flush=True)
+    print(f"run {label} done", flush=True)
+    return {
+        "x": xs,
+        "y": ys,
+        "vx": vxs,
+        "vy": vys,
+        "rho": rhos,
+        "phi": phis,
+        "kinetic": kinetic,
+        "field": field,
+        "energy": energy,
+    }
 
 
 def relative_change(energy):
@@ -151,10 +182,43 @@ def padded_limits(values, pad=0.08):
     return lo - pad * span, hi + pad * span
 
 
+def shared_clim(*fields):
+    lo = min(float(field.min()) for field in fields)
+    hi = max(float(field.max()) for field in fields)
+    if not np.isfinite(lo) or not np.isfinite(hi):
+        return -1.0, 1.0
+    if lo == hi:
+        span = max(abs(hi), 1.0)
+        return lo - 0.05 * span, hi + 0.05 * span
+    return lo, hi
+
+
+def histogram_series(values, bin_edges):
+    counts = np.empty((values.shape[0], bin_edges.size - 1), dtype=np.float64)
+    for frame, sample in enumerate(values):
+        counts[frame], _ = np.histogram(sample, bins=bin_edges, density=True)
+    return counts
+
+
+def energy_limits(kinetic, field, total):
+    vals = np.concatenate([kinetic, field, total])
+    lo, hi = padded_limits(vals)
+    finite = vals[np.isfinite(vals)]
+    if finite.size and float(finite.min()) >= 0.0:
+        lo = 0.0
+        hi = max(hi, float(finite.max()) * 1.1)
+    return lo, hi
+
+
 def apply_theme():
     plt.rcParams.update(
         {
-            "font.size": 11,
+            "font.size": 12,
+            "axes.titlesize": 13,
+            "axes.labelsize": 12,
+            "xtick.labelsize": 10,
+            "ytick.labelsize": 10,
+            "legend.fontsize": 9,
             "figure.facecolor": "#16181b",
             "axes.facecolor": "#1f2328",
             "axes.edgecolor": "#8b939e",
@@ -165,160 +229,389 @@ def apply_theme():
             "grid.color": "#3a414a",
             "grid.alpha": 0.85,
             "savefig.facecolor": "#16181b",
+            "legend.facecolor": "#1f2328",
+            "legend.edgecolor": "#8b939e",
         }
     )
 
 
+def add_dashboard(
+    ax_top,
+    ax_bot,
+    run,
+    *,
+    times,
+    L,
+    v_lim,
+    bin_edges,
+    hist_ylim,
+    hist_vx,
+    hist_vy,
+    phi_clim,
+    rho_clim,
+    energy_lim,
+    accent,
+    heading,
+    field_caption,
+    particle_colors,
+):
+    ax_vx, ax_vy, ax_phi, ax_xy = ax_top
+    ax_vx_h, ax_vy_h, ax_rho, ax_energy = ax_bot
+    lx, ly = float(L[0]), float(L[1])
+    extent = (0.0, lx, 0.0, ly)
+    t_max = float(times[-1])
+    v_lo, v_hi = v_lim
+
+    ax_vx.set_title(f"{heading}   " + r"$x$-$v_x$", color=accent, loc="left", pad=8)
+    ax_vx.set_xlim(0.0, lx)
+    ax_vx.set_ylim(v_lo, v_hi)
+    ax_vx.set_xlabel(r"$x / \lambda_D$")
+    ax_vx.set_ylabel(r"$v_x / v_{\rm th}$")
+    ax_vx.grid(True)
+    vx_scatter = ax_vx.scatter(
+        run["x"][0],
+        run["vx"][0],
+        s=5,
+        c=particle_colors,
+        linewidths=0,
+        alpha=0.85,
+        rasterized=True,
+    )
+
+    ax_vy.set_title(r"$y$-$v_y$", loc="left", pad=8)
+    ax_vy.set_xlim(0.0, ly)
+    ax_vy.set_ylim(v_lo, v_hi)
+    ax_vy.set_xlabel(r"$y / \lambda_D$")
+    ax_vy.set_ylabel(r"$v_y / v_{\rm th}$")
+    ax_vy.grid(True)
+    vy_scatter = ax_vy.scatter(
+        run["y"][0],
+        run["vy"][0],
+        s=5,
+        c=particle_colors,
+        linewidths=0,
+        alpha=0.85,
+        rasterized=True,
+    )
+
+    ax_phi.set_title(r"potential  $\phi$", loc="left", pad=8)
+    ax_phi.set_xlabel(r"$x / \lambda_D$")
+    ax_phi.set_ylabel(r"$y / \lambda_D$")
+    phi_im = ax_phi.imshow(
+        run["phi"][0].T,
+        origin="lower",
+        extent=extent,
+        cmap="jet",
+        interpolation="nearest",
+        aspect="auto",
+        vmin=phi_clim[0],
+        vmax=phi_clim[1],
+        rasterized=True,
+    )
+    phi_bar = plt.colorbar(phi_im, ax=ax_phi, fraction=0.046, pad=0.02)
+    phi_bar.set_label(r"$\phi / (T_e / e)$")
+
+    ax_xy.set_title(r"$x$-$y$ positions", loc="left", pad=8)
+    ax_xy.set_xlim(0.0, lx)
+    ax_xy.set_ylim(0.0, ly)
+    ax_xy.set_xlabel(r"$x / \lambda_D$")
+    ax_xy.set_ylabel(r"$y / \lambda_D$")
+    ax_xy.set_aspect("auto")
+    ax_xy.grid(True)
+    xy_scatter = ax_xy.scatter(
+        run["x"][0],
+        run["y"][0],
+        s=5,
+        c=particle_colors,
+        linewidths=0,
+        alpha=0.85,
+        rasterized=True,
+    )
+
+    ax_vx_h.set_title(r"$v_x$ histogram", loc="left", pad=8)
+    ax_vx_h.set_xlim(bin_edges[0], bin_edges[-1])
+    ax_vx_h.set_ylim(0.0, hist_ylim)
+    ax_vx_h.set_xlabel(r"$v_x / v_{\rm th}$")
+    ax_vx_h.set_ylabel("density")
+    ax_vx_h.grid(True)
+    _, _, vx_bars = ax_vx_h.hist(
+        run["vx"][0],
+        bins=bin_edges,
+        density=True,
+        color=RED,
+        edgecolor="none",
+    )
+
+    ax_vy_h.set_title(r"$v_y$ histogram", loc="left", pad=8)
+    ax_vy_h.set_xlim(bin_edges[0], bin_edges[-1])
+    ax_vy_h.set_ylim(0.0, hist_ylim)
+    ax_vy_h.set_xlabel(r"$v_y / v_{\rm th}$")
+    ax_vy_h.set_ylabel("density")
+    ax_vy_h.grid(True)
+    _, _, vy_bars = ax_vy_h.hist(
+        run["vy"][0],
+        bins=bin_edges,
+        density=True,
+        color=RED,
+        edgecolor="none",
+    )
+
+    ax_rho.set_title(r"charge density  $\rho$", loc="left", pad=8)
+    ax_rho.set_xlabel(r"$x / \lambda_D$")
+    ax_rho.set_ylabel(r"$y / \lambda_D$")
+    rho_im = ax_rho.imshow(
+        run["rho"][0].T,
+        origin="lower",
+        extent=extent,
+        cmap="jet",
+        interpolation="nearest",
+        aspect="auto",
+        vmin=rho_clim[0],
+        vmax=rho_clim[1],
+        rasterized=True,
+    )
+    rho_bar = plt.colorbar(rho_im, ax=ax_rho, fraction=0.046, pad=0.02)
+    rho_bar.set_label(r"$\rho / (e\lambda_D^{-2})$")
+
+    ax_energy.set_title(field_caption, loc="left", fontsize=10, pad=8)
+    ax_energy.set_xlim(0.0, t_max)
+    ax_energy.set_ylim(*energy_lim)
+    ax_energy.set_xlabel(r"$\omega_{\rm pe}t$")
+    ax_energy.set_ylabel(r"$E / (n_0 T_e / \varepsilon_0)$")
+    ax_energy.grid(True)
+    (kinetic_line,) = ax_energy.plot(
+        times[:1], run["kinetic"][:1], color=KINETIC_COLOR, linewidth=1.6, label="Kinetic"
+    )
+    (field_line,) = ax_energy.plot(
+        times[:1], run["field"][:1], color=FIELD_COLOR, linewidth=1.6, label="Field"
+    )
+    (total_line,) = ax_energy.plot(
+        times[:1], run["energy"][:1], color=TOTAL_COLOR, linewidth=1.8, label="Total"
+    )
+    cursor = ax_energy.axvline(times[0], color="#d7dde4", linewidth=0.9, alpha=0.85)
+    ax_energy.legend(loc="upper right", framealpha=0.92)
+    drift = ax_energy.text(
+        0.02,
+        0.96,
+        "",
+        transform=ax_energy.transAxes,
+        va="top",
+        ha="left",
+        fontsize=10,
+        color=accent,
+    )
+    return {
+        "vx_scatter": vx_scatter,
+        "vy_scatter": vy_scatter,
+        "xy_scatter": xy_scatter,
+        "phi_im": phi_im,
+        "rho_im": rho_im,
+        "vx_bars": vx_bars,
+        "vy_bars": vy_bars,
+        "hist_vx": hist_vx,
+        "hist_vy": hist_vy,
+        "kinetic_line": kinetic_line,
+        "field_line": field_line,
+        "total_line": total_line,
+        "cursor": cursor,
+        "drift": drift,
+        "run": run,
+    }
+
+
+def set_bar_heights(container, counts):
+    for rect, count in zip(container.patches, counts):
+        rect.set_height(count)
+
+
+def format_drift(value):
+    if not np.isfinite(value):
+        return "non-finite"
+    return f"{100.0 * value:+.3f}%"
 
 
 def render(old, new, times, L):
     apply_theme()
     old_rel = relative_change(old["energy"])
     new_rel = relative_change(new["energy"])
-    old_pct = 100.0 * old_rel
-    new_pct = 100.0 * new_rel
-    vx_lo, vx_hi = padded_limits(np.concatenate([old["vx"].ravel(), new["vx"].ravel()]))
-    e_lo, e_hi = padded_limits(np.concatenate([old_pct, new_pct]))
-    e_lo = min(e_lo, -0.05)
-    e_hi = max(e_hi, 0.05)
-    t_max = times[-1]
-
-    fig, axes = plt.subplots(
-        2,
-        2,
-        figsize=FIGSIZE,
-        gridspec_kw={"height_ratios": [1.35, 1.0], "hspace": 0.38, "wspace": 0.28},
+    v_lim = padded_limits(
+        np.concatenate(
+            [old["vx"].ravel(), new["vx"].ravel(), old["vy"].ravel(), new["vy"].ravel()]
+        )
     )
-    fig.subplots_adjust(left=0.07, right=0.98, top=0.86, bottom=0.12)
-    fig.suptitle(
-        "PiCM two-stream  ·  matched inputs  ·  555dce2 vs fd720e5\n"
-        "Reported total energy uses E/E_initial − 1 independently per version. "
-        "Baseline may drift; nothing was injected.",
+    bin_edges = np.linspace(v_lim[0], v_lim[1], HIST_BINS + 1)
+    old_hist_vx = histogram_series(old["vx"], bin_edges)
+    new_hist_vx = histogram_series(new["vx"], bin_edges)
+    old_hist_vy = histogram_series(old["vy"], bin_edges)
+    new_hist_vy = histogram_series(new["vy"], bin_edges)
+    hist_peak = max(
+        float(old_hist_vx.max()),
+        float(new_hist_vx.max()),
+        float(old_hist_vy.max()),
+        float(new_hist_vy.max()),
+        0.20,
+    )
+    hist_ylim = hist_peak * 1.1
+    phi_clim = shared_clim(old["phi"], new["phi"])
+    rho_clim = shared_clim(old["rho"], new["rho"])
+    old_e_lim = energy_limits(old["kinetic"], old["field"], old["energy"])
+    new_e_lim = energy_limits(new["kinetic"], new["field"], new["energy"])
+    shared_e_lim = (min(old_e_lim[0], new_e_lim[0]), max(old_e_lim[1], new_e_lim[1]))
+    old_colors = np.where(old["vx"][0] < 0.0, BLUE, RED)
+    new_colors = np.where(new["vx"][0] < 0.0, BLUE, RED)
+
+    fig, axes = plt.subplots(4, 4, figsize=FIGSIZE)
+    fig.subplots_adjust(left=0.06, right=0.985, top=0.90, bottom=0.065, hspace=0.42, wspace=0.30)
+    title = fig.suptitle("", fontsize=15, y=0.975)
+    fig.text(
+        0.018,
+        0.70,
+        f"BEFORE\n{BASELINE}",
+        rotation=90,
+        va="center",
+        ha="center",
+        color=ORANGE,
         fontsize=13,
+        fontweight="bold",
     )
-
-    columns = (
-        (
-            axes[0, 0],
-            axes[1, 0],
-            old,
-            old_pct,
-            ORANGE,
-            "555dce2  old",
-            r"Reported energy: $0.5\sum\rho\phi$ + kinetic (cell area omitted)",
-        ),
-        (
-            axes[0, 1],
-            axes[1, 1],
-            new,
-            new_pct,
-            BLUE,
-            "fd720e5  fixed",
-            r"Reported energy: $0.5\sum\rho\phi\,\Delta x\,\Delta y$ + kinetic",
-        ),
+    fig.text(
+        0.018,
+        0.28,
+        f"AFTER\n{FIXED}",
+        rotation=90,
+        va="center",
+        ha="center",
+        color=BLUE,
+        fontsize=13,
+        fontweight="bold",
     )
-    scatters = []
-    energy_lines = []
-    cursors = []
-    drift_texts = []
-
-    for ax_phase, ax_e, run, pct, color, heading, energy_caption in columns:
-        ax_phase.set_title(heading, color=color, loc="left", fontsize=12, pad=8)
-        ax_phase.set_xlim(0.0, float(L[0]))
-        ax_phase.set_ylim(vx_lo, vx_hi)
-        ax_phase.set_xlabel(r"$x$")
-        ax_phase.set_ylabel(r"$v_x$")
-        ax_phase.grid(True)
-        scatter = ax_phase.scatter(
-            run["x"][0],
-            run["vx"][0],
-            s=6,
-            c=color,
-            linewidths=0,
-            alpha=0.85,
-        )
-        scatters.append(scatter)
-
-        ax_e.set_title(energy_caption, fontsize=9, loc="left", pad=6)
-        ax_e.set_xlim(0.0, t_max)
-        ax_e.set_ylim(e_lo, e_hi)
-        ax_e.set_xlabel(r"simulation time  ($\omega_{\mathrm{pe}}t$)")
-        ax_e.set_ylabel(r"$(E/E_{\mathrm{initial}}-1)\times 100$  [%]")
-        ax_e.axhline(0.0, color="#8b939e", linewidth=0.8, linestyle="--")
-        ax_e.grid(True)
-        (energy_line,) = ax_e.plot(times[:1], pct[:1], color=color, linewidth=1.8)
-        cursor = ax_e.axvline(times[0], color="#d7dde4", linewidth=0.9, alpha=0.85)
-        drift = ax_e.text(
-            0.02,
-            0.92,
-            "",
-            transform=ax_e.transAxes,
-            va="top",
-            ha="left",
-            fontsize=10,
-            color=color,
-        )
-        energy_lines.append(energy_line)
-        cursors.append(cursor)
-        drift_texts.append(drift)
-
     fig.text(
         0.5,
-        0.025,
-        "256×256  ·  dt = 0.1  ·  2000 particles (every 50th of two_stream.dat)  ·  "
-        "no injected faults  ·  independent runs of the historical sources",
+        0.012,
+        "256x256  ·  dt = 0.1  ·  2000 particles (every 50th of two_stream.dat)  ·  "
+        "no injected faults  ·  independent historical sources 555dce2 / fd720e5  ·  "
+        "normalized total drift = E/E_initial - 1 per version",
         ha="center",
         va="bottom",
-        fontsize=9,
+        fontsize=10,
         color="#b7c0ca",
     )
 
+    dashboards = (
+        add_dashboard(
+            axes[0],
+            axes[1],
+            old,
+            times=times,
+            L=L,
+            v_lim=v_lim,
+            bin_edges=bin_edges,
+            hist_ylim=hist_ylim,
+            hist_vx=old_hist_vx,
+            hist_vy=old_hist_vy,
+            phi_clim=phi_clim,
+            rho_clim=rho_clim,
+            energy_lim=shared_e_lim,
+            accent=ORANGE,
+            heading=f"BEFORE  {BASELINE}",
+            field_caption="Field 0.5 sum(rho phi)  (cell area omitted)  + kinetic",
+            particle_colors=old_colors,
+        ),
+        add_dashboard(
+            axes[2],
+            axes[3],
+            new,
+            times=times,
+            L=L,
+            v_lim=v_lim,
+            bin_edges=bin_edges,
+            hist_ylim=hist_ylim,
+            hist_vx=new_hist_vx,
+            hist_vy=new_hist_vy,
+            phi_clim=phi_clim,
+            rho_clim=rho_clim,
+            energy_lim=shared_e_lim,
+            accent=BLUE,
+            heading=f"AFTER  {FIXED}",
+            field_caption="Field 0.5 sum(rho phi) dx dy  + kinetic",
+            particle_colors=new_colors,
+        ),
+    )
+    drifts = (old_rel, new_rel)
+
     def draw(frame):
-        for scatter, run in zip(scatters, (old, new)):
-            scatter.set_offsets(np.column_stack((run["x"][frame], run["vx"][frame])))
-        for line, pct, cursor, drift, series in zip(
-            energy_lines,
-            (old_pct, new_pct),
-            cursors,
-            drift_texts,
-            (old_rel, new_rel),
-        ):
-            line.set_data(times[: frame + 1], pct[: frame + 1])
-            cursor.set_xdata([times[frame], times[frame]])
-            now = series[frame]
-            now_txt = "non-finite" if not np.isfinite(now) else f"{100.0 * now:+.3f}%"
-            drift.set_text(f"t = {times[frame]:.1f}   drift now {now_txt}")
+        title.set_text(
+            "PiCM two-stream  ·  matched inputs  ·  "
+            f"{BASELINE} vs {FIXED}\n"
+            rf"$\omega_{{\rm pe}}t = {times[frame]:.2f}$"
+            "  ·  all 8 original diagrams per version"
+        )
+        for artists, rel in zip(dashboards, drifts):
+            run = artists["run"]
+            artists["vx_scatter"].set_offsets(np.column_stack((run["x"][frame], run["vx"][frame])))
+            artists["vy_scatter"].set_offsets(np.column_stack((run["y"][frame], run["vy"][frame])))
+            artists["xy_scatter"].set_offsets(np.column_stack((run["x"][frame], run["y"][frame])))
+            artists["phi_im"].set_data(run["phi"][frame].T)
+            artists["rho_im"].set_data(run["rho"][frame].T)
+            set_bar_heights(artists["vx_bars"], artists["hist_vx"][frame])
+            set_bar_heights(artists["vy_bars"], artists["hist_vy"][frame])
+            artists["kinetic_line"].set_data(times[: frame + 1], run["kinetic"][: frame + 1])
+            artists["field_line"].set_data(times[: frame + 1], run["field"][: frame + 1])
+            artists["total_line"].set_data(times[: frame + 1], run["energy"][: frame + 1])
+            artists["cursor"].set_xdata([times[frame], times[frame]])
+            now = rel[frame]
+            peak = float(np.nanmax(np.abs(rel))) if np.any(np.isfinite(rel)) else float("nan")
+            peak_txt = "non-finite" if not np.isfinite(peak) else f"{100.0 * peak:.3f}%"
+            artists["drift"].set_text(
+                f"Total drift {format_drift(now)}\n"
+                f"Peak |drift| {peak_txt}"
+            )
 
     plt.rcParams["animation.ffmpeg_path"] = FFMPEG
     writer = FFMpegWriter(
         fps=FPS,
-        metadata={"title": "PiCM resolution energy comparison"},
+        metadata={"title": "PiCM resolution all-diagram comparison"},
         extra_args=["-pix_fmt", "yuv420p", "-movflags", "+faststart"],
     )
+    print("render start", flush=True)
     with writer.saving(fig, str(MP4_PATH), DPI):
         for frame in range(STEPS):
             draw(frame)
             writer.grab_frame()
+            if frame % 100 == 0 or frame + 1 == STEPS:
+                print(f"render {frame}/{STEPS - 1}", flush=True)
     fig.savefig(PNG_PATH, dpi=DPI)
     plt.close(fig)
+    print("render done", flush=True)
 
 
 def main():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    print("Running matched before/after simulations", flush=True)
+    print(
+        f"start  n={N_CELLS}  dt={DT}  steps={STEPS}  fps={FPS}  "
+        f"N=2000  out={MP4_PATH}",
+        flush=True,
+    )
     state = load_inputs()
     old_mod = load_simulation(BASELINE, "picm_baseline_555dce2")
     new_mod = load_simulation(FIXED, "picm_fixed_fd720e5")
-    old = run_version(old_mod, baseline_energy, state)
-    new = run_version(new_mod, fixed_energy, state)
-    print("Simulation histories ready; rendering animation", flush=True)
-    old_rel = relative_change(old["energy"])
-    new_rel = relative_change(new["energy"])
+    old = run_version(old_mod, baseline_field_energy, state, f"before {BASELINE}")
+    new = run_version(new_mod, fixed_field_energy, state, f"after {FIXED}")
     times = np.arange(STEPS, dtype=np.float64) * DT
     render(old, new, times, state["L"])
 
-    old_finite = bool(np.all(np.isfinite(old["energy"])))
-    new_finite = bool(np.all(np.isfinite(new["energy"])))
+    old_rel = relative_change(old["energy"])
+    new_rel = relative_change(new["energy"])
+    old_finite = bool(
+        np.all(np.isfinite(old["kinetic"]))
+        and np.all(np.isfinite(old["field"]))
+        and np.all(np.isfinite(old["energy"]))
+    )
+    new_finite = bool(
+        np.all(np.isfinite(new["kinetic"]))
+        and np.all(np.isfinite(new["field"]))
+        and np.all(np.isfinite(new["energy"]))
+    )
     old_max = float(np.nanmax(np.abs(old_rel))) if np.any(np.isfinite(old_rel)) else float("nan")
     new_max = float(np.nanmax(np.abs(new_rel))) if np.any(np.isfinite(new_rel)) else float("nan")
     print(f"finite outcome  old={old_finite}  fixed={new_finite}")
