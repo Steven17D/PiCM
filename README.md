@@ -14,6 +14,11 @@ contaminate the field.
 
 Run the numerical regressions with `python -m unittest discover -s tests -p test_simulation.py`.
 
+The [formal energy-normalization note](docs/energy-normalization-findings.md)
+compares the paper and authors' reference code, derives the missing area factor,
+and records the limits of the finding. Reproduce the analytic counterexample
+with `uv run scripts/check_energy_normalization.py`.
+
 # Example
 ## Velocity distribution in x axis
 ![](output/x_streams/20240524-201029-0.png)
