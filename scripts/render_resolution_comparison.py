@@ -34,8 +34,8 @@ BASELINE = "555dce2"
 FIXED = "fd720e5"
 FIXTURE = REPO / "tests" / "electrosctatic"
 OUTPUT_DIR = Path.home() / "Movies" / "PiCM"
-MP4_PATH = OUTPUT_DIR / "resolution-comparison-all-diagrams.mp4"
-PNG_PATH = OUTPUT_DIR / "resolution-comparison-all-diagrams.png"
+MP4_PATH = OUTPUT_DIR / "full-population-comparison.mp4"
+PNG_PATH = OUTPUT_DIR / "full-population-comparison.png"
 
 N_CELLS = 256
 DT = 0.1
@@ -44,6 +44,10 @@ FPS = 15
 FIGSIZE = (24.0, 16.0)
 DPI = 100
 HIST_BINS = 50
+PREVIEW_FRAME = 300
+# Subsampling the simulation changes noise and particle trapping.
+# Keep every particle in the physics; thin only the scatter drawings.
+SCATTER_STRIDE = 10
 ORANGE = "#e67e22"
 BLUE = "#4ea3f1"
 RED = "#e05d5d"
@@ -72,14 +76,14 @@ def load_simulation(commit: str, name: str):
 
 
 def load_inputs():
-    _, L, _ = load_config(FIXTURE / "sim_two_stream.json")
+    n_expected, L, _ = load_config(FIXTURE / "sim_two_stream.json")
     L = np.asarray(L, dtype=np.float64)
-    positions, velocities, q_m, moves = (
-        values[::50] for values in local_initial_state(FIXTURE / "two_stream.dat")
-    )
+    positions, velocities, q_m, moves = local_initial_state(FIXTURE / "two_stream.dat")
     n_particles = len(positions)
-    if n_particles != 2000:
-        raise RuntimeError(f"expected 2000-particle subset, got {n_particles}")
+    if n_particles != n_expected:
+        raise RuntimeError(
+            f"expected {n_expected} particles from load_config, got {n_particles}"
+        )
     charges = np.prod(L) * q_m / n_particles
     mass = np.prod(L) / n_particles
     n = np.array([N_CELLS, N_CELLS], dtype=int)
@@ -106,6 +110,14 @@ def fixed_field_energy(module, rho, phi, state):
     return float(module.calculate_field_energy(rho, phi, state["delta_r"]))
 
 
+def periodic_x(x, lx):
+    return np.mod(x + 0.5 * lx, lx) - 0.5 * lx
+
+
+def rolled_xy_image(field):
+    return np.roll(field, field.shape[0] // 2, axis=0).T
+
+
 def run_version(module, field_energy_fn, state, label):
     print(f"run {label}", flush=True)
     positions = state["positions"].copy()
@@ -115,10 +127,10 @@ def run_version(module, field_energy_fn, state, label):
     moves = state["moves"].copy()
     n_moving = int(np.count_nonzero(moves == 1))
     nx, ny = int(state["n"][0]), int(state["n"][1])
-    xs = np.empty((STEPS, n_moving), dtype=np.float64)
-    ys = np.empty((STEPS, n_moving), dtype=np.float64)
-    vxs = np.empty((STEPS, n_moving), dtype=np.float64)
-    vys = np.empty((STEPS, n_moving), dtype=np.float64)
+    xs = np.empty((STEPS, n_moving), dtype=np.float32)
+    ys = np.empty((STEPS, n_moving), dtype=np.float32)
+    vxs = np.empty((STEPS, n_moving), dtype=np.float32)
+    vys = np.empty((STEPS, n_moving), dtype=np.float32)
     rhos = np.empty((STEPS, nx, ny), dtype=np.float32)
     phis = np.empty((STEPS, nx, ny), dtype=np.float32)
     kinetic = np.empty(STEPS, dtype=np.float64)
@@ -258,19 +270,24 @@ def add_dashboard(
     ax_vx, ax_vy, ax_phi, ax_xy = ax_top
     ax_vx_h, ax_vy_h, ax_rho, ax_energy = ax_bot
     lx, ly = float(L[0]), float(L[1])
-    extent = (0.0, lx, 0.0, ly)
+    extent = (-0.5 * lx, 0.5 * lx, 0.0, ly)
     t_max = float(times[-1])
     v_lo, v_hi = v_lim
+    dots = slice(None, None, SCATTER_STRIDE)
+    x_dots = periodic_x(run["x"][0][dots], lx)
+    y_dots = run["y"][0][dots]
+    vx_dots = run["vx"][0][dots]
+    vy_dots = run["vy"][0][dots]
 
     ax_vx.set_title(f"{heading}   " + r"$x$-$v_x$", color=accent, loc="left", pad=8)
-    ax_vx.set_xlim(0.0, lx)
+    ax_vx.set_xlim(-0.5 * lx, 0.5 * lx)
     ax_vx.set_ylim(v_lo, v_hi)
     ax_vx.set_xlabel(r"$x / \lambda_D$")
     ax_vx.set_ylabel(r"$v_x / v_{\rm th}$")
     ax_vx.grid(True)
     vx_scatter = ax_vx.scatter(
-        run["x"][0],
-        run["vx"][0],
+        x_dots,
+        vx_dots,
         s=5,
         c=particle_colors,
         linewidths=0,
@@ -285,8 +302,8 @@ def add_dashboard(
     ax_vy.set_ylabel(r"$v_y / v_{\rm th}$")
     ax_vy.grid(True)
     vy_scatter = ax_vy.scatter(
-        run["y"][0],
-        run["vy"][0],
+        y_dots,
+        vy_dots,
         s=5,
         c=particle_colors,
         linewidths=0,
@@ -298,7 +315,7 @@ def add_dashboard(
     ax_phi.set_xlabel(r"$x / \lambda_D$")
     ax_phi.set_ylabel(r"$y / \lambda_D$")
     phi_im = ax_phi.imshow(
-        run["phi"][0].T,
+        rolled_xy_image(run["phi"][0]),
         origin="lower",
         extent=extent,
         cmap="jet",
@@ -312,15 +329,15 @@ def add_dashboard(
     phi_bar.set_label(r"$\phi / (T_e / e)$")
 
     ax_xy.set_title(r"$x$-$y$ positions", loc="left", pad=8)
-    ax_xy.set_xlim(0.0, lx)
+    ax_xy.set_xlim(-0.5 * lx, 0.5 * lx)
     ax_xy.set_ylim(0.0, ly)
     ax_xy.set_xlabel(r"$x / \lambda_D$")
     ax_xy.set_ylabel(r"$y / \lambda_D$")
     ax_xy.set_aspect("auto")
     ax_xy.grid(True)
     xy_scatter = ax_xy.scatter(
-        run["x"][0],
-        run["y"][0],
+        x_dots,
+        y_dots,
         s=5,
         c=particle_colors,
         linewidths=0,
@@ -360,7 +377,7 @@ def add_dashboard(
     ax_rho.set_xlabel(r"$x / \lambda_D$")
     ax_rho.set_ylabel(r"$y / \lambda_D$")
     rho_im = ax_rho.imshow(
-        run["rho"][0].T,
+        rolled_xy_image(run["rho"][0]),
         origin="lower",
         extent=extent,
         cmap="jet",
@@ -399,6 +416,7 @@ def add_dashboard(
         ha="left",
         fontsize=10,
         color=accent,
+        bbox={"facecolor": plt.rcParams["axes.facecolor"], "edgecolor": "none"},
     )
     return {
         "vx_scatter": vx_scatter,
@@ -430,7 +448,7 @@ def format_drift(value):
     return f"{100.0 * value:+.3f}%"
 
 
-def render(old, new, times, L):
+def render(old, new, times, L, n_particles):
     apply_theme()
     old_rel = relative_change(old["energy"])
     new_rel = relative_change(new["energy"])
@@ -457,8 +475,12 @@ def render(old, new, times, L):
     old_e_lim = energy_limits(old["kinetic"], old["field"], old["energy"])
     new_e_lim = energy_limits(new["kinetic"], new["field"], new["energy"])
     shared_e_lim = (min(old_e_lim[0], new_e_lim[0]), max(old_e_lim[1], new_e_lim[1]))
-    old_colors = np.where(old["vx"][0] < 0.0, BLUE, RED)
-    new_colors = np.where(new["vx"][0] < 0.0, BLUE, RED)
+    dots = slice(None, None, SCATTER_STRIDE)
+    old_colors = np.where(old["vx"][0][dots] < 0.0, BLUE, RED)
+    new_colors = np.where(new["vx"][0][dots] < 0.0, BLUE, RED)
+    n_moving = old["x"].shape[1]
+    n_dots = n_moving // SCATTER_STRIDE
+    lx = float(L[0])
 
     fig, axes = plt.subplots(4, 4, figsize=FIGSIZE)
     fig.subplots_adjust(left=0.06, right=0.985, top=0.90, bottom=0.065, hspace=0.42, wspace=0.30)
@@ -488,7 +510,9 @@ def render(old, new, times, L):
     fig.text(
         0.5,
         0.012,
-        "256x256  ·  dt = 0.1  ·  2000 particles (every 50th of two_stream.dat)  ·  "
+        f"256x256  ·  dt = 0.1  ·  {STEPS} frames  ·  {n_particles} simulated particles  ·  "
+        f"{n_dots} moving dots (stride {SCATTER_STRIDE})  ·  "
+        r"periodic $x$ window $[-L_x/2, L_x/2)$  ·  "
         "no injected faults  ·  independent historical sources 555dce2 / fd720e5  ·  "
         "normalized total drift = E/E_initial - 1 per version",
         ha="center",
@@ -544,15 +568,21 @@ def render(old, new, times, L):
             "PiCM two-stream  ·  matched inputs  ·  "
             f"{BASELINE} vs {FIXED}\n"
             rf"$\omega_{{\rm pe}}t = {times[frame]:.2f}$"
-            "  ·  all 8 original diagrams per version"
+            f"  ·  {n_particles} simulated particles  ·  {n_dots} moving dots"
+            r"  ·  periodic $x$ window $[-L_x/2, L_x/2)$"
+            f"  ·  {STEPS} frames  ·  all 8 original diagrams per version"
         )
         for artists, rel in zip(dashboards, drifts):
             run = artists["run"]
-            artists["vx_scatter"].set_offsets(np.column_stack((run["x"][frame], run["vx"][frame])))
-            artists["vy_scatter"].set_offsets(np.column_stack((run["y"][frame], run["vy"][frame])))
-            artists["xy_scatter"].set_offsets(np.column_stack((run["x"][frame], run["y"][frame])))
-            artists["phi_im"].set_data(run["phi"][frame].T)
-            artists["rho_im"].set_data(run["rho"][frame].T)
+            x_dots = periodic_x(run["x"][frame][dots], lx)
+            y_dots = run["y"][frame][dots]
+            vx_dots = run["vx"][frame][dots]
+            vy_dots = run["vy"][frame][dots]
+            artists["vx_scatter"].set_offsets(np.column_stack((x_dots, vx_dots)))
+            artists["vy_scatter"].set_offsets(np.column_stack((y_dots, vy_dots)))
+            artists["xy_scatter"].set_offsets(np.column_stack((x_dots, y_dots)))
+            artists["phi_im"].set_data(rolled_xy_image(run["phi"][frame]))
+            artists["rho_im"].set_data(rolled_xy_image(run["rho"][frame]))
             set_bar_heights(artists["vx_bars"], artists["hist_vx"][frame])
             set_bar_heights(artists["vy_bars"], artists["hist_vy"][frame])
             artists["kinetic_line"].set_data(times[: frame + 1], run["kinetic"][: frame + 1])
@@ -570,7 +600,7 @@ def render(old, new, times, L):
     plt.rcParams["animation.ffmpeg_path"] = FFMPEG
     writer = FFMpegWriter(
         fps=FPS,
-        metadata={"title": "PiCM resolution all-diagram comparison"},
+        metadata={"title": "PiCM full-population comparison"},
         extra_args=["-pix_fmt", "yuv420p", "-movflags", "+faststart"],
     )
     print("render start", flush=True)
@@ -580,6 +610,7 @@ def render(old, new, times, L):
             writer.grab_frame()
             if frame % 100 == 0 or frame + 1 == STEPS:
                 print(f"render {frame}/{STEPS - 1}", flush=True)
+    draw(PREVIEW_FRAME)
     fig.savefig(PNG_PATH, dpi=DPI)
     plt.close(fig)
     print("render done", flush=True)
@@ -587,18 +618,19 @@ def render(old, new, times, L):
 
 def main():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    state = load_inputs()
+    n_particles = len(state["positions"])
     print(
         f"start  n={N_CELLS}  dt={DT}  steps={STEPS}  fps={FPS}  "
-        f"N=2000  out={MP4_PATH}",
+        f"N={n_particles}  out={MP4_PATH}",
         flush=True,
     )
-    state = load_inputs()
     old_mod = load_simulation(BASELINE, "picm_baseline_555dce2")
     new_mod = load_simulation(FIXED, "picm_fixed_fd720e5")
     old = run_version(old_mod, baseline_field_energy, state, f"before {BASELINE}")
     new = run_version(new_mod, fixed_field_energy, state, f"after {FIXED}")
     times = np.arange(STEPS, dtype=np.float64) * DT
-    render(old, new, times, state["L"])
+    render(old, new, times, state["L"], n_particles)
 
     old_rel = relative_change(old["energy"])
     new_rel = relative_change(new["energy"])
