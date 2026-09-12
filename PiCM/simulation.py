@@ -1,75 +1,36 @@
 """
 Implementation of PiCM simulation.
 """
-import os
-from concurrent.futures import ThreadPoolExecutor
-
 import numpy as np
 from tqdm import tqdm
 
 
-grhos: np.ndarray = None
-
-
-def _density(positions: np.ndarray, charges: np.array, rhos: np.ndarray, n: np.array, delta_r: np.array) -> np.ndarray:
-    """
-    Calculate the grid of charge density
-    :param positions: List of charge positions
-    :param charges: List of charges
-    :param i: Index of global rho buffer
-    :param n: Grid dimensions
-    :param delta_r: Grid cell size
-    :return: Grid of charge density
-    """
-    rho = np.zeros(n)
-    ijs = np.floor(positions / delta_r).astype(int)
-    ijs_up = (ijs + [0, 1]) % n
-    ijs_right = (ijs + [1, 0]) % n
-    ijs_diag = (ijs + [1, 1]) % n
-    h = positions - ijs * delta_r
-    h_n = delta_r - h
-
-    origin_values = h_n[:, 0] * h_n[:, 1] * charges
-    up_values = h_n[:, 0] * h[:, 1] * charges
-    right_values = h[:, 0] * h_n[:, 1] * charges
-    diag_values = h[:, 0] * h[:, 1] * charges
-
-    sub_rho = np.concatenate([origin_values, up_values, right_values, diag_values])
-    indices = np.array([ijs, ijs_up, ijs_right, ijs_diag])
-
-    rho_index = np.arange(positions.shape[0])
-    rho_index = np.broadcast_to(rho_index, (4, *rho_index.shape))
-    flat_indices = indices[:, :, 0] + rho.shape[1] * indices[:, :, 1] + rho.size * rho_index
-
-    np.put(rhos, flat_indices, sub_rho)
-    np.add.reduce(rhos, axis=0, out=rho)
-    np.put(rhos, flat_indices, 0)
-    return (rho / (delta_r[0] * delta_r[0] * delta_r[1] * delta_r[1])).T
-
-
 def density(positions: np.ndarray, charges: np.array, n: np.array, delta_r: np.array):
     """
-    Calculate the charge density in parallel.
+    Cloud-in-cell charge density on a periodic grid of shape (nx, ny).
     """
-    global grhos
+    rho = np.zeros(n, dtype=np.float64)
+    if positions.shape[0] == 0:
+        return rho
 
-    thread_count = os.cpu_count()
-    chunk_size = positions.shape[0] // thread_count
-    if grhos is None:
-        grhos = np.zeros((thread_count, chunk_size, *n))
-
-    remainder = positions.shape[0] % thread_count
-    remainder_positions = positions[-remainder:]
-    remainder_charges = charges[-remainder:]
-    remainder_rho = _density(remainder_positions, remainder_charges, grhos[0], n, delta_r)
-
-    with ThreadPoolExecutor(max_workers=thread_count) as e:
-        results = e.map(lambda p: _density(p[0], p[1], p[2], n, delta_r),
-                        zip(np.split(positions[:-remainder], thread_count),
-                            np.split(charges[:-remainder], thread_count),
-                            [grhos[i] for i in range(thread_count)])
-                        )
-        return np.sum(results, axis=0) + remainder_rho
+    nx, ny = n[0], n[1]
+    cell_area = delta_r[0] * delta_r[1]
+    fx = positions[:, 0] / delta_r[0]
+    fy = positions[:, 1] / delta_r[1]
+    i = np.floor(fx).astype(int)
+    j = np.floor(fy).astype(int)
+    wx = fx - i
+    wy = fy - j
+    i0 = i % nx
+    j0 = j % ny
+    i1 = (i + 1) % nx
+    j1 = (j + 1) % ny
+    q = charges / cell_area
+    np.add.at(rho, (i0, j0), (1.0 - wx) * (1.0 - wy) * q)
+    np.add.at(rho, (i0, j1), (1.0 - wx) * wy * q)
+    np.add.at(rho, (i1, j0), wx * (1.0 - wy) * q)
+    np.add.at(rho, (i1, j1), wx * wy * q)
+    return rho
 
 
 def potential(rho: np.ndarray, n: np.array, delta_r: np.array) -> np.ndarray:
@@ -80,37 +41,17 @@ def potential(rho: np.ndarray, n: np.array, delta_r: np.array) -> np.ndarray:
     :param delta_r: Grid cell size
     :return: Potential of charge density in grid form
     """
-    rho = rho.astype(complex)
-
-    # FFT rho to rho_k
-    for xi in range(n[0]):
-        rho[xi, :] = np.fft.fft(rho[xi, :])
-    for yi in range(n[1]):
-        rho[:, yi] = np.fft.fft(rho[:, yi])
-
-    rho_k = rho
-    # Calculate phi_k from rho_k
-    Wx = np.exp(2j * np.pi / n[0])
-    Wy = np.exp(2j * np.pi / n[1])
-    Wn, Wm = 1, 1
-    dx_2, dy_2 = delta_r ** 2
-
-    phi_k = np.empty_like(rho_k, dtype=complex)
-    for ni in range(n[0]):
-        for m in range(n[1]):
-            denom = dy_2 * (2.0 - Wn - 1.0 / Wn) + dx_2 * (2.0 - Wm - 1.0 / Wm)
-            if denom:
-                phi_k[ni, m] = rho_k[ni, m] * (dx_2 * dy_2) / denom
-            Wm *= Wy
-        Wn *= Wx
-
-    # Inverse FFT phi_k to phi
-    for xi in range(n[0]):
-        phi_k[xi, :] = np.fft.ifft(phi_k[xi, :])
-    for yi in range(n[1]):
-        phi_k[:, yi] = np.fft.ifft(phi_k[:, yi])
-
-    return np.real(phi_k)
+    nx, ny = int(n[0]), int(n[1])
+    dx2, dy2 = delta_r[0] ** 2, delta_r[1] ** 2
+    sx = np.sin(np.pi * np.arange(nx) / nx)
+    sy = np.sin(np.pi * np.arange(ny) / ny)
+    # 5-point FD eigenvalues: 4 sin^2(pi k / n) / dr^2. Cross-multiplied
+    # rectangular weights match 2 - W - 1/W without Wm recurrence roundoff.
+    lap = 4.0 * sx[:, None] ** 2 / dx2 + 4.0 * sy[None, :] ** 2 / dy2
+    lap[0, 0] = 1.0
+    phi_k = np.fft.fft2(rho) / lap
+    phi_k[0, 0] = 0.0
+    return np.real(np.fft.ifft2(phi_k))
 
 
 def field_nodes(phi: np.ndarray, n: np.array, delta_r: np.array) -> np.ndarray:
@@ -221,3 +162,7 @@ def simulate(positions, velocities, q_m, charges, moves, L, n, delta_r, B, dt, s
 
 def calculate_kinetic_energy(velocities, masses):
     return (masses * (velocities[:, 0] ** 2 + velocities[:, 1] ** 2)).sum() / 2
+
+
+def calculate_field_energy(rho, phi, delta_r):
+    return 0.5 * np.sum(rho * phi) * np.prod(delta_r)
