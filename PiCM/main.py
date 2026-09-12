@@ -8,7 +8,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib.animation import FFMpegWriter
 
-from PiCM.simulation import simulate, density, potential, calculate_kinetic_energy
+from PiCM.simulation import simulate, density, potential, calculate_kinetic_energy, calculate_field_energy
 from PiCM.probability import get_random_value, maxwell_distribution
 
 matplotlib.style.use('classic')
@@ -192,7 +192,7 @@ def main():
             ax_vy_h.set_ylim([0, max(n.max(), 0.20) * 1.1])
 
             kinetic_energies[step] = calculate_kinetic_energy(velocities, moving_masses)
-            field_energies[step] = (rho * phi).sum() * 0.5
+            field_energies[step] = calculate_field_energy(rho, phi, delta_r)
             total_energy = kinetic_energies[:step + 1] + field_energies[:step + 1]
             kinetic_energy_plot.set_data(times[:step + 1], kinetic_energies[:step + 1])
             field_energy_plot.set_data(times[:step + 1], field_energies[:step + 1])
